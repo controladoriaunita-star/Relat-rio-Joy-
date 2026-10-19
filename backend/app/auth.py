@@ -70,6 +70,12 @@ def criar_verificador(banco: Banco) -> Verificador:
     return VerificadorSupabase()
 
 
+def usuario_sem_login() -> dict:
+    """Usuário único usado enquanto o login está inativo (config.LOGIN_ATIVO = False)."""
+    return {"id": "sem-login", "usuario_id": "sem-login", "email": "", "login": "sem-login",
+            "nome": "Acesso livre", "perfil": config.PERFIL_SEM_LOGIN}
+
+
 def usuario_do_token(banco: Banco, verificador: Verificador, token: str | None) -> dict | None:
     if not token:
         return None

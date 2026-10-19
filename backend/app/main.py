@@ -60,11 +60,14 @@ class ArquivosEstaticos(StaticFiles):
         return resposta
 
 
-def criar_app(servico: Servico | None = None, verificador: auth.Verificador | None = None) -> FastAPI:
+def criar_app(servico: Servico | None = None, verificador: auth.Verificador | None = None,
+              login_ativo: bool | None = None) -> FastAPI:
     servico = servico or Servico(Banco(config.DATABASE_URL))
     servico.inicializar()
     banco = servico.banco
-    verificador = verificador or auth.criar_verificador(banco)
+    login_ativo = config.LOGIN_ATIVO if login_ativo is None else login_ativo
+    if login_ativo:
+        verificador = verificador or auth.criar_verificador(banco)
     local = isinstance(verificador, auth.VerificadorLocal)
 
     app = FastAPI(title="Relatório de Aporte · Joy+ Evans", docs_url="/api/docs",
@@ -81,6 +84,8 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
 
     # ------------------------------------------------------------------ dependências
     def usuario_atual(request: Request) -> dict:
+        if not login_ativo:                      # login inativo: acesso direto com perfil fixo
+            return auth.usuario_sem_login()
         cabecalho = request.headers.get("Authorization", "")
         token = cabecalho[7:] if cabecalho.lower().startswith("bearer ") else None
         usuario = auth.usuario_do_token(banco, verificador, token)
@@ -95,6 +100,10 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
             return usuario
         return verificar
 
+    def exigir_login_ativo() -> None:
+        if not login_ativo:
+            raise HTTPException(409, "O login está inativo; a gestão de usuários fica indisponível.")
+
     def data_base(data: date | None = None) -> date:
         return data or date.today()
 
@@ -102,6 +111,8 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
     @app.get("/api/config")
     def configuracao():
         """Dados públicos para o navegador iniciar o supabase-js (a anon key é pública)."""
+        if not login_ativo:
+            return {"modo": "sem_login"}
         if local:
             return {"modo": "local", "usuarios": banco.todos(
                 "SELECT usuario_id, nome, perfil FROM perfis WHERE ativo = 1 ORDER BY nome")}
@@ -110,7 +121,8 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
 
     @app.get("/api/eu")
     def eu(usuario: dict = Depends(usuario_atual)):
-        return {**usuario, "permissoes": auth.permissoes(usuario),
+        permissoes = {**auth.permissoes(usuario), "gerir_usuarios": login_ativo and usuario["perfil"] == "adm"}
+        return {**usuario, "permissoes": permissoes, "login_ativo": login_ativo,
                 "perfil_nome": servico.perfis().get(usuario["perfil"], usuario["perfil"])}
 
     # ------------------------------------------------------------------ relatórios
@@ -192,15 +204,15 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
     def salvar_linha(dados: dict, usuario: dict = Depends(exigir("administrar"))):
         return {"id": servico.salvar_linha(dados, usuario)}
 
-    @app.get("/api/usuarios")
+    @app.get("/api/usuarios", dependencies=[Depends(exigir_login_ativo)])
     def usuarios(_: dict = Depends(exigir("administrar"))):
         return {"usuarios": servico.listar_usuarios(), "perfis": servico.perfis()}
 
-    @app.post("/api/usuarios")
+    @app.post("/api/usuarios", dependencies=[Depends(exigir_login_ativo)])
     def criar_usuario(dados: NovoUsuario, usuario: dict = Depends(exigir("administrar"))):
         return {"id": servico.criar_usuario(dados.email, dados.nome, dados.perfil, dados.senha, usuario)}
 
-    @app.patch("/api/usuarios/{usuario_id}")
+    @app.patch("/api/usuarios/{usuario_id}", dependencies=[Depends(exigir_login_ativo)])
     def alterar_usuario(usuario_id: str, dados: AlteraUsuario, usuario: dict = Depends(exigir("administrar"))):
         servico.alterar_usuario(usuario_id, dados.model_dump(), usuario)
         return {"ok": True}

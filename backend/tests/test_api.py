@@ -43,7 +43,7 @@ def ambiente(tmp_path_factory):
     ids = {login: servico.criar_usuario(f"{login}@joy.test", login, perfil, None, None)
            for login, perfil in USUARIOS.items()}
     # O verificador local troca o JWT do Supabase nos testes ("local:<usuario_id>").
-    app = criar_app(servico=servico, verificador=auth.VerificadorLocal())
+    app = criar_app(servico=servico, verificador=auth.VerificadorLocal(), login_ativo=True)
     return {"app": app, "servico": servico, "relatorio": relatorio, "ids": ids,
             "excel": openpyxl.load_workbook(ARQUIVO_EXCEL, data_only=True)}
 
@@ -260,3 +260,16 @@ def test_usuario_desativado_perde_acesso(ambiente):
     assert adm.patch(f"/api/usuarios/{novo}", json={"ativo": False}).status_code == 200
     assert cliente(ambiente, novo).get("/api/eu").status_code == 401
     assert adm.post("/api/usuarios", json={"email": "x", "nome": "X", "perfil": "mkt"}).status_code == 422
+
+
+# ------------------------------------------------------------------------ login inativo
+def test_sem_login_acesso_direto_com_perfil_fixo(ambiente):
+    app = criar_app(servico=ambiente["servico"], login_ativo=False)
+    c = TestClient(app)
+    assert c.get("/api/config").json() == {"modo": "sem_login"}
+    eu = c.get("/api/eu").json()
+    assert eu["nome"] == "Acesso livre" and eu["perfil"] == "adm" and eu["login_ativo"] is False
+    assert eu["permissoes"]["gerir_usuarios"] is False
+    assert c.get(f"/api/resumo?data={HOJE}").status_code == 200
+    assert c.get("/api/usuarios").status_code == 409          # gestão de usuários indisponível
+    assert c.post("/api/usuarios", json={"email": "a@b.c", "nome": "A", "perfil": "mkt"}).status_code == 409

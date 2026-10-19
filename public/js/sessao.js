@@ -28,10 +28,13 @@ export async function iniciarSessao() {
 }
 
 export const modoLocal = () => configuracao?.modo === 'local';
+// Login temporariamente inativo (APORTE_LOGIN_ATIVO=0): a API usa um perfil fixo.
+export const semLogin = () => configuracao?.modo === 'sem_login';
 export const usuariosLocais = () => configuracao?.usuarios || [];
 export const precisaDefinirSenha = () => definirSenhaPendente;
 
 export async function token() {
+  if (semLogin()) return null;
   if (modoLocal()) {
     const id = lerLocal();
     return id ? `local:${id}` : null;

@@ -55,7 +55,11 @@ só funciona com SQLite e nunca na Vercel.
 setor (`mkt`, `proj`, `inc`). Um setor novo (aba Projeção › Setores e linhas) cria o perfil
 correspondente. Setores só editam meses a partir do mês corrente; diretor e adm editam qualquer mês.
 
-**Login:** Supabase Auth (e-mail e senha). O navegador envia o access token (JWT) para a API,
+**Login (temporariamente inativo):** com `APORTE_LOGIN_ATIVO` ausente ou `0`, não há tela de
+login: todos entram com o perfil `APORTE_PERFIL_SEM_LOGIN` (padrão `adm`) e a gestão de usuários
+fica indisponível. Para reativar, defina `APORTE_LOGIN_ATIVO=1` (Vercel e `.env`) e faça um novo deploy.
+
+**Login (quando ativo):** Supabase Auth (e-mail e senha). O navegador envia o access token (JWT) para a API,
 que valida assinatura, audiência e emissor e busca o perfil na tabela `perfis`. Um usuário
 desativado perde o acesso na hora e fica bloqueado no Supabase.
 

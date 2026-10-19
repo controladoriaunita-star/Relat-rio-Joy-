@@ -92,13 +92,13 @@ function montarShell() {
           <span>Data-base</span><input type="date" id="data-base" value="${estado.dataBase}" />
         </label>
         <div class="u"><b>${esc(u.nome)}</b><span>${esc(u.perfil_nome)}</span></div>
-        ${sessao.modoLocal() ? '' : '<button class="btn inverse sm" id="conta">Conta</button>'}
-        <button class="btn inverse sm" id="sair">Sair</button>
+        ${sessao.modoLocal() || sessao.semLogin() ? '' : '<button class="btn inverse sm" id="conta">Conta</button>'}
+        ${sessao.semLogin() ? '' : '<button class="btn inverse sm" id="sair">Sair</button>'}
       </div>
     </div></header>
     ${sessao.modoLocal() ? '<div class="alert a-warning faixa-local"><b>Modo local de desenvolvimento</b> · sem Supabase, dados em SQLite.</div>' : ''}
     <main id="conteudo"></main>`;
-  document.getElementById('sair').onclick = async () => { await sessao.sair(); telaLogin(); };
+  document.getElementById('sair')?.addEventListener('click', async () => { await sessao.sair(); telaLogin(); });
   document.getElementById('conta')?.addEventListener('click', () => modal({
     titulo: 'Trocar senha',
     conteudo: `<div class="field" style="margin-top:16px"><label>Nova senha</label>

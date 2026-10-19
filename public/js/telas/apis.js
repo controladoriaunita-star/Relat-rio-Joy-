@@ -200,7 +200,7 @@ const SUB_ABAS = [
   { id: 'fontes', titulo: 'Fontes (APIs)', tela: fontes },
   { id: 'saldos', titulo: 'Saldos bancários', tela: saldos },
   { id: 'parametros', titulo: 'Viabilidade', tela: parametros },
-  { id: 'usuarios', titulo: 'Usuários', tela: usuarios, permissao: 'administrar' },
+  { id: 'usuarios', titulo: 'Usuários', tela: usuarios, permissao: 'gerir_usuarios' },
   { id: 'historico', titulo: 'Histórico', tela: historico },
 ];
 
