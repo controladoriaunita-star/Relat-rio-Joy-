@@ -1,0 +1,6 @@
+.env
+data/
+backend/tests/
+**/__pycache__/
+*.xlsm
+INICIAR_SISTEMA.bat

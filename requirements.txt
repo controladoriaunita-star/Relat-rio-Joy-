@@ -1,0 +1,5 @@
+# Produção (função Python da Vercel)
+fastapi>=0.110
+requests>=2.31
+psycopg[binary]>=3.2
+pyjwt[crypto]>=2.9
