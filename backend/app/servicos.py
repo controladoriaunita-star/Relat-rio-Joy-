@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from collections import defaultdict
 from dataclasses import fields
 from datetime import date
@@ -10,16 +11,18 @@ from datetime import date
 import requests
 
 from . import auth
-from .catalogo import (INICIO_LINHA_DO_TEMPO, MESES_LINHA_DO_TEMPO, PERFIS_GERAIS, RUBRICAS,
-                       SETORES_PADRAO, VIABILIDADE_PADRAO, Premissas)
+from .catalogo import (INICIO_LINHA_DO_TEMPO, MESES_LINHA_DO_TEMPO, PAPEIS_GERAIS, PAPEL_ADMIN, PERMISSOES,
+                       PERMISSOES_PADRAO, PERMISSOES_SETOR, RUBRICAS, SETORES_PADRAO, VIABILIDADE_PADRAO,
+                       Premissas)
 from .config import ARQUIVO_EXCEL, EMPRESA_SPE
 from .db import Banco, agora, para_json
-from .excel_funcoes import como_data, eomonth, meses_entre
+from .excel_funcoes import chave_texto, como_data, eomonth, meses_entre, texto_igual
 from .fontes.definicoes import FONTES, FONTES_POR_CODIGO
 from .fontes.graph import ClienteGraph, ErroGraph
 from .fontes.montagem import montar_base
 from .fontes.normalizacao import montar_depara, normalizar, tabela_para_dicts
 from .motor.base import Base, LinhaProjecao, SaldoConta
+from .motor import dashboards as painel_dashboards
 from .motor.painel import calcular_painel
 from .motor.resumo import calcular_resumo
 
@@ -50,10 +53,50 @@ class Servico:
                     for i, (nome, rubrica) in enumerate(setor["linhas"]):
                         con.execute("INSERT INTO linhas_projecao (setor_id, nome, rubrica, ordem) "
                                     "VALUES (?, ?, ?, ?)", (sid, nome, rubrica, i))
+        self._semear_permissoes()
         if self.banco.parametro("premissas") is None:
             self.banco.salvar_parametro("premissas", Premissas().como_dict())
         if self.banco.parametro("viabilidade") is None:
             self.banco.salvar_parametro("viabilidade", VIABILIDADE_PADRAO)
+
+    def _semear_permissoes(self) -> None:
+        """Garante as permissões do catálogo e um papel para admin, diretor e cada setor.
+
+        Papel novo recebe as permissões padrão; papel existente não é alterado (o que foi
+        ajustado na tela de permissões fica). Toda permissão é concedida ao admin, como o
+        gatilho permissions_grant_admin faz no Supabase.
+        """
+        with self.banco.transacao() as con:
+            existentes = {l["key"] for l in con.execute("SELECT key FROM permissions").fetchall()}
+            for chave, descricao in PERMISSOES.items():
+                if chave in existentes:
+                    continue
+                con.execute("INSERT INTO permissions (id, key, description) VALUES (?, ?, ?)",
+                            (str(uuid.uuid4()), chave, descricao))
+                for papel, padrao in PERMISSOES_PADRAO.items():   # permissão nova: papéis que a têm no padrão
+                    if chave in padrao:
+                        con.execute("INSERT INTO role_permissions (role_id, permission_id) SELECT r.id, p.id "
+                                    "FROM roles r CROSS JOIN permissions p WHERE r.key = ? AND p.key = ? "
+                                    "ON CONFLICT DO NOTHING", (papel, chave))
+            papeis = {k: (nome, desc, PERMISSOES_PADRAO[k]) for k, (nome, desc) in PAPEIS_GERAIS.items()}
+            for setor in con.execute("SELECT codigo, nome FROM setores").fetchall():
+                papeis.setdefault(setor["codigo"], (setor["nome"], f"Setor {setor['nome']}", PERMISSOES_SETOR))
+            for chave, (nome, descricao, padrao) in papeis.items():
+                self._criar_papel(con, chave, nome, descricao, padrao)
+            con.execute("INSERT INTO role_permissions (role_id, permission_id) SELECT r.id, p.id "
+                        "FROM roles r CROSS JOIN permissions p WHERE r.key = ? ON CONFLICT DO NOTHING",
+                        (PAPEL_ADMIN,))
+
+    @staticmethod
+    def _criar_papel(con, chave: str, nome: str, descricao: str, permissoes: list[str]) -> None:
+        if con.execute("SELECT 1 FROM roles WHERE key = ?", (chave,)).fetchone():
+            return
+        papel_id = str(uuid.uuid4())
+        con.execute("INSERT INTO roles (id, key, name, description) VALUES (?, ?, ?, ?)",
+                    (papel_id, chave, nome, descricao))
+        for permissao in permissoes:
+            con.execute("INSERT INTO role_permissions (role_id, permission_id) SELECT ?, id FROM permissions "
+                        "WHERE key = ? ON CONFLICT DO NOTHING", (papel_id, permissao))
 
     # ================================================================ parâmetros
     def premissas(self) -> Premissas:
@@ -69,9 +112,9 @@ class Servico:
         for chave, valor in dados.items():
             if chave not in atual:
                 raise ErroNegocio(f"Premissa desconhecida: {chave}")
-            if chave == "aportes_programados":
-                valor = [{"titulo": str(a["titulo"]), "valor": float(a["valor"])} for a in valor]
-            elif chave == "custo_projetado_proximo" and valor is None:
+            if chave == "cronogramas_aporte":
+                raise ErroNegocio("O cronograma do aporte é salvo em /api/parametros/cronograma.")
+            if chave == "custo_projetado_proximo" and valor is None:
                 pass                                    # volta ao cálculo automático
             else:
                 valor = float(valor)
@@ -79,6 +122,40 @@ class Servico:
         self.banco.salvar_parametro("premissas", atual)
         with self.banco.transacao() as con:
             self.banco.registrar(con, usuario["login"], "premissas.salvar", dados)
+        return self.premissas()
+
+    def salvar_cronograma(self, mes, parcelas: list[dict], usuario: dict) -> Premissas:
+        """Cronograma do aporte de um mês: 1 a 12 parcelas com data no mês e percentuais que
+        somam 100%. Sem parcelas, volta à parcela única no dia 1."""
+        mes = como_data(mes)
+        if not mes:
+            raise ErroNegocio("Mês inválido.")
+        mes = eomonth(mes)
+        normalizadas = []
+        for p in parcelas:
+            data = como_data(p.get("data"))
+            percentual = float(p.get("percentual") or 0)
+            if not data or eomonth(data) != mes:
+                raise ErroNegocio(f"Cada parcela precisa ter data dentro de {mes.strftime('%m/%Y')}.")
+            if percentual <= 0:
+                raise ErroNegocio("O percentual de cada parcela precisa ser maior que zero.")
+            normalizadas.append({"data": data.isoformat(), "percentual": round(percentual, 6)})
+        if len(normalizadas) > 12:
+            raise ErroNegocio("No máximo 12 parcelas por mês.")
+        if normalizadas and abs(sum(p["percentual"] for p in normalizadas) - 100) > 0.01:
+            raise ErroNegocio("As parcelas precisam somar 100% do aporte do mês.")
+        normalizadas.sort(key=lambda p: p["data"])
+        atual = self.premissas().como_dict()
+        cronogramas = dict(atual.get("cronogramas_aporte") or {})
+        chave = mes.strftime("%Y-%m")
+        if normalizadas:
+            cronogramas[chave] = normalizadas
+        else:
+            cronogramas.pop(chave, None)
+        atual["cronogramas_aporte"] = cronogramas
+        self.banco.salvar_parametro("premissas", atual)
+        with self.banco.transacao() as con:
+            self.banco.registrar(con, usuario["login"], "cronograma.salvar", {"mes": chave, "parcelas": normalizadas})
         return self.premissas()
 
     def salvar_viabilidade(self, dados: dict[str, float], usuario: dict) -> dict:
@@ -199,6 +276,7 @@ class Servico:
                 "registros": len(resultado.registros),
                 "valor_total": round(sum(r.valor for r in resultado.registros), 2),
                 "pendentes": len(resultado.pendentes),
+                "ignoradas": resultado.ignoradas,
                 "classificavel": bool(fonte.chave),
                 "historico": cargas,
             })
@@ -261,14 +339,26 @@ class Servico:
         return [{**s, "linhas": por_setor[s["id"]]} for s in setores]
 
     def perfis(self) -> dict[str, str]:
-        return {**PERFIS_GERAIS, **{s["codigo"]: s["nome"] for s in self.setores()}}
+        """Papéis disponíveis (chave → nome), na ordem: admin, diretor e setores."""
+        ordem = {k: i for i, k in enumerate(PAPEIS_GERAIS)}
+        papeis = self.banco.todos("SELECT key, name FROM roles")
+        papeis.sort(key=lambda p: (ordem.get(p["key"], len(ordem)), p["name"]))
+        return {p["key"]: p["name"] for p in papeis}
 
     # ================================================================ usuários
     def listar_usuarios(self) -> list[dict]:
-        return self.banco.todos("SELECT usuario_id, email, nome, perfil, ativo, criado_em FROM perfis ORDER BY nome")
+        usuarios = self.banco.todos("SELECT CAST(id AS TEXT) AS usuario_id, email, full_name AS nome, "
+                                    "active AS ativo, created_at AS criado_em FROM profiles ORDER BY full_name")
+        papeis = defaultdict(list)
+        for l in self.banco.todos("SELECT CAST(ur.user_id AS TEXT) AS usuario_id, r.key FROM user_roles ur "
+                                  "JOIN roles r ON r.id = ur.role_id ORDER BY r.key"):
+            papeis[l["usuario_id"]].append(l["key"])
+        return [{**u, "ativo": bool(u["ativo"]), "criado_em": str(u["criado_em"]),
+                 "papeis": papeis[u["usuario_id"]], "perfil": (papeis[u["usuario_id"]] or [None])[0]}
+                for u in usuarios]
 
     def criar_usuario(self, email: str, nome: str, perfil: str, senha: str | None, autor: dict | None) -> str:
-        """Cria o usuário no Supabase Auth (com senha ou convite por e-mail) e registra o perfil."""
+        """Cria o usuário no Supabase Auth (com senha ou convite por e-mail), o profile e o papel."""
         email = email.strip().lower()
         if "@" not in email or not nome.strip():
             raise ErroNegocio("Informe nome e e-mail válidos.")
@@ -280,46 +370,84 @@ class Servico:
             usuario_id = self.admin.criar(email, nome, senha)
         except auth.ErroAutenticacao as erro:
             raise ErroNegocio(str(erro)) from erro
-        auth.registrar_perfil(self.banco, usuario_id, email, nome, perfil, autor and autor["login"])
+        auth.registrar_usuario(self.banco, usuario_id, email, nome, perfil, autor)
         return usuario_id
 
     def alterar_usuario(self, usuario_id: str, dados: dict, autor: dict) -> None:
-        atual = self.banco.um("SELECT * FROM perfis WHERE usuario_id = ?", usuario_id)
+        atual = self.banco.um("SELECT full_name, active FROM profiles WHERE id = ?", usuario_id)
         if not atual:
             raise ErroNegocio("Usuário não encontrado.")
-        perfil = dados.get("perfil") or atual["perfil"]
-        if perfil not in self.perfis():
+        if dados.get("perfil") and dados["perfil"] not in self.perfis():
             raise ErroNegocio("Perfil inválido.")
         if dados.get("senha") and len(dados["senha"]) < 8:
             raise ErroNegocio("A senha precisa ter ao menos 8 caracteres.")
-        ativo = atual["ativo"] if dados.get("ativo") is None else int(bool(dados["ativo"]))
+        ativo = bool(atual["active"]) if dados.get("ativo") is None else bool(dados["ativo"])
         try:
             self.admin.alterar(usuario_id, senha=dados.get("senha"),
                                bloqueado=None if dados.get("ativo") is None else not ativo)
         except auth.ErroAutenticacao as erro:
             raise ErroNegocio(str(erro)) from erro
         with self.banco.transacao() as con:
-            con.execute("UPDATE perfis SET nome = ?, perfil = ?, ativo = ? WHERE usuario_id = ?",
-                        (dados.get("nome") or atual["nome"], perfil, ativo, usuario_id))
+            con.execute("UPDATE profiles SET full_name = ?, active = ? WHERE id = ?",
+                        (dados.get("nome") or atual["full_name"], ativo, usuario_id))
+            if dados.get("perfil"):                    # a tela trabalha com um papel por usuário
+                con.execute("DELETE FROM user_roles WHERE user_id = ?", (usuario_id,))
+                con.execute("INSERT INTO user_roles (id, user_id, role_id, granted_by) "
+                            "SELECT ?, ?, id, ? FROM roles WHERE key = ?",
+                            (str(uuid.uuid4()), usuario_id, auth.uuid_ou_none(autor["id"]), dados["perfil"]))
             self.banco.registrar(con, autor["login"], "usuario.alterar",
-                                 {"usuario_id": usuario_id, "perfil": perfil, "ativo": ativo,
+                                 {"usuario_id": usuario_id, "perfil": dados.get("perfil"), "ativo": ativo,
                                   "senha_redefinida": bool(dados.get("senha"))})
+
+    # ================================================================ papéis e permissões
+    def matriz_permissoes(self) -> dict:
+        concessoes = defaultdict(list)
+        for l in self.banco.todos("SELECT r.key AS papel, p.key AS permissao FROM role_permissions rp "
+                                  "JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id"):
+            concessoes[l["papel"]].append(l["permissao"])
+        papeis = {p["key"]: p for p in self.banco.todos("SELECT key, name, description FROM roles")}
+        ordem = list(PERMISSOES)
+        permissoes = self.banco.todos("SELECT key, description FROM permissions")
+        permissoes.sort(key=lambda p: ordem.index(p["key"]) if p["key"] in ordem else len(ordem))
+        return {"permissoes": permissoes, "papel_admin": PAPEL_ADMIN,
+                "papeis": [{**papeis[k], "permissoes": sorted(concessoes[k])} for k in self.perfis()]}
+
+    def alterar_permissao(self, papel: str, permissao: str, concedida: bool, autor: dict) -> None:
+        if papel == PAPEL_ADMIN:
+            raise ErroNegocio("O papel admin tem sempre todas as permissões.")
+        ids = self.banco.um("SELECT r.id AS papel_id, p.id AS permissao_id FROM roles r, permissions p "
+                            "WHERE r.key = ? AND p.key = ?", papel, permissao)
+        if not ids:
+            raise ErroNegocio("Papel ou permissão inválidos.")
+        with self.banco.transacao() as con:
+            if concedida:
+                con.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?) "
+                            "ON CONFLICT DO NOTHING", (ids["papel_id"], ids["permissao_id"]))
+            else:
+                con.execute("DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?",
+                            (ids["papel_id"], ids["permissao_id"]))
+            self.banco.registrar(con, autor["login"], "permissao.alterar",
+                                 {"papel": papel, "permissao": permissao, "concedida": concedida})
 
     def salvar_setor(self, dados: dict, usuario: dict) -> int:
         codigo = str(dados.get("codigo", "")).strip().lower()
         nome = str(dados.get("nome", "")).strip()
         if not codigo.isalnum() or not nome:
             raise ErroNegocio("Código (letras/números) e nome são obrigatórios.")
-        if codigo in auth.PERFIS_GESTORES:
+        if codigo in auth.PAPEIS_RESERVADOS:
             raise ErroNegocio("Código reservado.")
         with self.banco.transacao() as con:
             if dados.get("id"):
+                anterior = con.execute("SELECT codigo FROM setores WHERE id = ?", (dados["id"],)).fetchone()
                 con.execute("UPDATE setores SET codigo = ?, nome = ?, ativo = ?, ordem = ? WHERE id = ?",
                             (codigo, nome, int(dados.get("ativo", 1)), int(dados.get("ordem", 0)), dados["id"]))
+                if anterior:                           # o papel do setor acompanha código e nome
+                    con.execute("UPDATE roles SET key = ?, name = ? WHERE key = ?", (codigo, nome, anterior["codigo"]))
                 setor_id = dados["id"]
             else:
                 setor_id = con.execute("INSERT INTO setores (codigo, nome, ordem) VALUES (?, ?, ?) RETURNING id",
                                        (codigo, nome, int(dados.get("ordem", 99)))).fetchone()["id"]
+            self._criar_papel(con, codigo, nome, f"Setor {nome}", PERMISSOES_SETOR)
             self.banco.registrar(con, usuario["login"], "setor.salvar", dados)
         return setor_id
 
@@ -374,15 +502,57 @@ class Servico:
                              "realizado": realizado, "a_pagar": linha["a_pagar"], "projetado": projetado,
                              "saldo": linha["viabilidade"] - realizado - linha["a_pagar"] - projetado})
         return {"meses": meses, "mes_atual": mes_atual,
-                "pode_editar_passado": auth.permissoes(usuario)["editar_meses_passados"],
+                "pode_editar_passado": auth.permissoes(usuario)["projecao.editar_meses_passados"],
                 "setores": setores, "rubricas": rubricas}
+
+    def comparativo_projecao(self, mes: date, codigo_setor: str | None) -> dict:
+        """Projetado por linha × lançamentos da base de custos (Custos SPE e NN's) no mês,
+        nas rubricas das linhas do setor (ou de todos os setores, sem código)."""
+        mes = eomonth(mes)
+        setores = [s for s in self.setores() if not codigo_setor or s["codigo"] == codigo_setor]
+        if codigo_setor and not setores:
+            raise ErroNegocio("Setor inválido.")
+        valores = {p["linha_id"]: p["valor"] for p in self.banco.todos(
+            "SELECT linha_id, valor FROM projecoes WHERE mes = ?", mes.isoformat())}
+        projetado = [{"setor": s["nome"], "linha": l["nome"], "rubrica": l["rubrica"],
+                      "valor": valores.get(l["id"], 0)} for s in setores for l in s["linhas"]]
+        rubricas = {chave_texto(p["rubrica"]): p["rubrica"] for p in projetado}
+
+        base, _ = self.base()
+        incorrido = []
+        for fonte in ("custos_spe", "custos_nn"):
+            for d in getattr(base, fonte):
+                rubrica = rubricas.get(chave_texto(d.classificacao))
+                if d.fim_mes == mes and rubrica:
+                    incorrido.append({"fonte": FONTES_POR_CODIGO[fonte].titulo, "rubrica": rubrica,
+                                      "fornecedor": d.fornecedor, "insumo": d.insumo, "processo": d.processo,
+                                      "data": d.data_pagamento, "status": d.status, "valor": d.valor})
+        incorrido.sort(key=lambda i: (i["rubrica"], i["data"] or mes, i["fornecedor"] or ""))
+        pago = sum(i["valor"] for i in incorrido if texto_igual(i["status"], "Pago"))
+        total_incorrido = sum(i["valor"] for i in incorrido)
+        return {"mes": mes, "setor": codigo_setor or None, "projetado": projetado, "incorrido": incorrido,
+                "totais": {"projetado": sum(p["valor"] for p in projetado), "incorrido": total_incorrido,
+                           "pago": pago, "a_pagar": total_incorrido - pago}}
+
+    def dashboards(self, hoje: date) -> dict:
+        """Séries da aba Dashboards (ver motor/dashboards.py)."""
+        painel, resumo = self.calcular("painel", hoje), self.calcular("resumo", hoje)
+        base, _ = self.base()
+        projecoes = self.banco.todos("SELECT p.linha_id, p.mes, p.valor FROM projecoes p "
+                                     "JOIN linhas_projecao l ON l.id = p.linha_id WHERE l.ativo = 1")
+        return {"datas": {**resumo["datas"], "corte": painel["datas"]["corte"]},
+                "exposicao": painel_dashboards.exposicao_de_caixa(painel),
+                "recebimentos": painel_dashboards.recebimentos(base, resumo["datas"]["mes_atual"]),
+                "setores": painel_dashboards.gasto_por_setor(base, self.setores(), projecoes),
+                "custos": painel_dashboards.custos_por_rubrica(resumo),
+                "ultima_atualizacao": resumo["ultima_atualizacao"]}
 
     def salvar_projecao(self, itens: list[dict], usuario: dict, hoje: date) -> int:
         mes_atual = eomonth(hoje)
         linhas = {l["id"]: l for l in self.banco.todos(
             "SELECT l.id, l.nome, s.codigo FROM linhas_projecao l JOIN setores s ON s.id = l.setor_id "
             "WHERE l.ativo = 1 AND s.ativo = 1")}
-        pode_passado = auth.permissoes(usuario)["editar_meses_passados"]
+        pode_passado = auth.permissoes(usuario)["projecao.editar_meses_passados"]
         normalizados = []
         for item in itens:
             linha = linhas.get(item.get("linha_id"))

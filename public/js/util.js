@@ -111,5 +111,20 @@ export function focarMesCorrente(container) {
   if (coluna && primeira) grade.scrollLeft = Math.max(0, coluna.offsetLeft - primeira.offsetWidth - 3 * coluna.offsetWidth);
 }
 
+/**
+ * Desenha um SVG na largura real do contêiner: `desenhar(largura)` devolve o markup com
+ * viewBox igual ao tamanho em pixels, então o texto não é ampliado. Redesenha ao redimensionar.
+ */
+export function montarGrafico(alvo, desenhar) {
+  if (!alvo) return;
+  let largura = 0;
+  const pintar = () => {
+    const atual = Math.floor(alvo.clientWidth);
+    if (atual > 0 && atual !== largura) { largura = atual; alvo.innerHTML = desenhar(atual); }
+  };
+  new ResizeObserver(pintar).observe(alvo);
+  pintar();
+}
+
 export const carregando = (linhas = 6) =>
   `<div class="card pad grid" style="gap:12px">${'<div class="skel"></div>'.repeat(linhas)}</div>`;

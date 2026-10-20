@@ -11,7 +11,7 @@ function statusFonte(f) {
   return ['b-success', 'OK'];
 }
 
-function cartaoFonte(f) {
+function cartaoFonte(f, podeClassificar) {
   const [classe, rotulo] = statusFonte(f);
   const ok = f.ultima_ok;
   const variacao = f.variacao_linhas === null ? '—' : `${f.variacao_linhas > 0 ? '+' : ''}${f.variacao_linhas}`;
@@ -27,7 +27,7 @@ function cartaoFonte(f) {
       <dd>${ok ? fmt.dataHora(ok.iniciado_em) : '—'}</dd><dd>${ok ? `${ok.origem === 'graph' ? 'SharePoint' : 'Excel'} · ${ok.duracao_s}s` : '—'}</dd>
     </dl>
     ${f.ultima?.status === 'erro' ? `<div class="erro"><b>${fmt.dataHora(f.ultima.iniciado_em)}</b> · ${esc(f.ultima.mensagem)}</div>` : ''}
-    ${f.pendentes ? `<button class="btn secondary sm" data-pendentes="${f.codigo}">Classificar ${f.pendentes} lançamento(s)</button>` : ''}
+    ${f.pendentes && podeClassificar ? `<button class="btn secondary sm" data-pendentes="${f.codigo}">Classificar ${f.pendentes} lançamento(s)</button>` : ''}
   </div>`;
 }
 
@@ -70,11 +70,11 @@ async function fontes(el, ctx) {
     </div>
     ${falhas.length ? `<div class="alert a-warning" style="margin-bottom:16px"><b>${falhas.length} fonte(s) falharam na última atualização</b>
       <div>O cálculo continua usando a última carga válida de cada fonte. ${esc(falhas[0].ultima.mensagem)}</div></div>` : ''}
-    <div class="row-flex" style="margin-bottom:16px">
+    ${ctx.usuario.permissoes['fontes.atualizar'] ? `<div class="row-flex" style="margin-bottom:16px">
       <button class="btn primary" id="atualizar-graph">Atualizar do SharePoint</button>
       ${dados.excel_disponivel ? '<button class="btn secondary" id="atualizar-excel" title="Lê as tabelas do Controle - Joy+ Evans.xlsm da pasta do projeto">Importar do Excel local</button>' : ''}
-    </div>
-    <div class="fontes">${dados.fontes.map(cartaoFonte).join('')}</div>
+    </div>` : ''}
+    <div class="fontes">${dados.fontes.map((f) => cartaoFonte(f, ctx.usuario.permissoes['fontes.classificar'])).join('')}</div>
     <p class="sub" style="margin-top:28px">Últimas cargas</p>
     <div class="sheet"><table><thead><tr><th class="first">Fonte</th><th>Data</th><th>Origem</th><th>Status</th><th>Linhas</th><th>Duração</th><th style="text-align:left">Mensagem</th></tr></thead>
       <tbody>${dados.fontes.flatMap((f) => f.historico.slice(0, 3).map((c) => `<tr><td class="first">${esc(f.titulo)}</td>
@@ -93,14 +93,14 @@ async function fontes(el, ctx) {
     } catch (erro) { erroToast(erro); }
     ctx.recarregar();
   };
-  el.querySelector('#atualizar-graph').onclick = (e) => atualizar('graph', e.currentTarget);
+  el.querySelector('#atualizar-graph')?.addEventListener('click', (e) => atualizar('graph', e.currentTarget));
   el.querySelector('#atualizar-excel')?.addEventListener('click', (e) => atualizar('excel', e.currentTarget));
   el.querySelectorAll('[data-pendentes]').forEach((b) => (b.onclick = () => abrirPendentes(b.dataset.pendentes, dados.rubricas, ctx.recarregar)));
 }
 
 async function saldos(el, ctx) {
   const lista = await api('/api/saldos');
-  const pode = ctx.usuario.permissoes.editar_saldos;
+  const pode = ctx.usuario.permissoes['saldos.editar'];
   el.innerHTML = `
     <div class="alert a-info" style="margin-bottom:16px"><b>Saldo bancário por lançamento manual</b>
       <div>O Resumo usa, para cada conta, o saldo do último dia lançado no mês (regra da aba Saldo da planilha).</div></div>
@@ -136,7 +136,7 @@ async function saldos(el, ctx) {
 
 async function parametros(el, ctx) {
   const { viabilidade } = await api('/api/parametros');
-  const pode = ctx.usuario.permissoes.editar_premissas;
+  const pode = ctx.usuario.permissoes['premissas.editar'];
   el.innerHTML = `<div class="alert a-info" style="margin-bottom:16px"><b>Valor de viabilidade (EVE) por rubrica</b>
       <div>Coluna D do Resumo e X do Painel. As premissas do aporte ficam no botão "Premissas" da aba Resumo.</div></div>
     <div class="card pad"><form id="form-viab"><div class="formulario">
@@ -187,6 +187,22 @@ async function usuarios(el, ctx) {
     acoes: [{ rotulo: 'Salvar', classe: 'primary', ao: (m) => alterar(b.dataset.senha, { senha: m.querySelector('[name=nova]').value }, 'Senha redefinida') }] })));
 }
 
+async function permissoes(el, ctx) {
+  const m = await api('/api/permissoes');
+  const cab = m.papeis.map((p) => `<th title="${esc(p.description || '')}">${esc(p.name)}<span class="letra">${esc(p.key)}</span></th>`).join('');
+  const linhas = m.permissoes.map((perm) => `<tr><td class="first">${esc(perm.description)}<span class="rubrica-sub">${esc(perm.key)}</span></td>
+    ${m.papeis.map((p) => `<td style="text-align:center"><input type="checkbox" data-papel="${esc(p.key)}" data-permissao="${esc(perm.key)}"
+      ${p.permissoes.includes(perm.key) ? 'checked' : ''} ${p.key === m.papel_admin ? 'disabled title="O admin tem sempre todas as permissões"' : ''} /></td>`).join('')}</tr>`).join('');
+  el.innerHTML = `<p class="muted" style="margin:0 0 12px">Cada setor é um papel com o código do setor. A mudança vale na próxima ação do usuário, sem deploy.</p>
+    <div class="sheet"><table class="matriz"><thead><tr><th class="first">Permissão</th>${cab}</tr></thead><tbody>${linhas}</tbody></table></div>`;
+  el.querySelectorAll('input[data-papel]').forEach((c) => (c.onchange = async () => {
+    try {
+      await api('/api/permissoes', { metodo: 'PUT', corpo: { papel: c.dataset.papel, permissao: c.dataset.permissao, concedida: c.checked } });
+      toast(c.checked ? 'Permissão concedida' : 'Permissão removida');
+    } catch (erro) { c.checked = !c.checked; erroToast(erro); }
+  }));
+}
+
 async function historico(el) {
   const itens = await api('/api/historico?limite=300');
   el.innerHTML = `<div class="sheet" style="max-height:70vh"><table><thead><tr><th class="first">Quando</th><th style="text-align:left">Usuário</th>
@@ -201,6 +217,7 @@ const SUB_ABAS = [
   { id: 'saldos', titulo: 'Saldos bancários', tela: saldos },
   { id: 'parametros', titulo: 'Viabilidade', tela: parametros },
   { id: 'usuarios', titulo: 'Usuários', tela: usuarios, permissao: 'gerir_usuarios' },
+  { id: 'permissoes', titulo: 'Permissões', tela: permissoes, permissao: 'usuarios.gerenciar' },
   { id: 'historico', titulo: 'Histórico', tela: historico },
 ];
 

@@ -20,6 +20,10 @@ class Desembolso:            # Custos_SPE e BD_NN_s
     data_pagamento: date | None
     fim_mes: date
     valor: float
+    # Só para consulta (aba Projeção › Projetado × Incorrido); o cálculo não usa.
+    fornecedor: str | None = None
+    insumo: str | None = None
+    processo: str | None = None
 
 
 @dataclass(frozen=True)

@@ -11,13 +11,28 @@ import re
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 ESQUEMA_SQLITE = """
-CREATE TABLE IF NOT EXISTS perfis (
-    usuario_id TEXT PRIMARY KEY, email TEXT NOT NULL, nome TEXT NOT NULL, perfil TEXT NOT NULL,
-    ativo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS profiles (
+    id TEXT PRIMARY KEY, full_name TEXT NOT NULL DEFAULT '', email TEXT,
+    active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS roles (
+    id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS permissions (
+    id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, description TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS role_permissions (
+    role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    permission_id TEXT NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (role_id, permission_id));
+CREATE TABLE IF NOT EXISTS user_roles (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE, granted_by TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE (user_id, role_id));
 CREATE TABLE IF NOT EXISTS setores (
     id INTEGER PRIMARY KEY, codigo TEXT NOT NULL UNIQUE, nome TEXT NOT NULL,
     ordem INTEGER NOT NULL DEFAULT 0, ativo INTEGER NOT NULL DEFAULT 1);
@@ -56,8 +71,16 @@ def para_json(valor) -> str:
     return json.dumps(valor, default=_json_padrao, ensure_ascii=False)
 
 
+# Horário de Brasília (sem horário de verão desde 2019). Na Vercel o relógio do servidor é UTC.
+FUSO_BRASILIA = timezone(timedelta(hours=-3), "BRT")
+
+
 def agora() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now(FUSO_BRASILIA).replace(tzinfo=None).isoformat(timespec="seconds")
+
+
+def hoje() -> date:
+    return datetime.now(FUSO_BRASILIA).date()
 
 
 class ErroIntegridade(Exception):

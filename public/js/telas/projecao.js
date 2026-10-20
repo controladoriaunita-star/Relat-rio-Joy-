@@ -1,8 +1,9 @@
 // Aba Projeção: cada setor projeta suas linhas mês a mês. O total por rubrica
 // alimenta as colunas "Projetado" do Resumo e do Painel.
 import { api, carregando, erroToast, esc, fmt, focarMesCorrente, lerNumero, modal, toast } from '../util.js';
+import * as comparativo from './comparativo.js';
 
-const estado = { dados: null, alteracoes: new Map(), setor: null, ano: null, soComValor: false };
+const estado = { dados: null, alteracoes: new Map(), setor: null, ano: null, soComValor: false, visao: 'grade' };
 const chave = (linha, mes) => `${linha}|${mes}`;
 
 function valorAtual(linha, mes) {
@@ -194,27 +195,49 @@ export function sair() {
   return true;
 }
 
-export async function render(el, { usuario, dataBase, recarregar }) {
+/** Cabeçalho da aba, comum às duas visões, com o alternador Grade | Projetado × Incorrido. */
+function topo(d, usuario) {
+  const editaveis = d.setores.filter((s) => s.editavel).map((s) => s.nome);
+  const texto = estado.visao === 'comparativo'
+    ? 'Consulta do mês: o que cada linha projetou e os custos lançados nas rubricas do setor.'
+    : `${editaveis.length === d.setores.length ? 'Você pode editar todos os setores.' : editaveis.length ? `Você edita: ${esc(editaveis.join(', '))}.` : 'Somente leitura.'}
+        Os totais por rubrica entram no "Projetado" do Resumo e do Painel.`;
+  return `<div class="cabecalho"><div>
+      <div class="eyebrow">Projeção de custos</div><h2>${estado.visao === 'comparativo' ? 'Projetado × Incorrido' : 'Projeção por setor'}</h2>
+      <p>${texto}</p>
+    </div><div class="row-flex sem-impressao">
+      <div class="segmentado" role="tablist">
+        <button data-visao="grade" class="${estado.visao === 'grade' ? 'on' : ''}">Grade</button>
+        <button data-visao="comparativo" class="${estado.visao === 'comparativo' ? 'on' : ''}">Projetado × Incorrido</button></div>
+      ${usuario.permissoes['setores.gerenciar'] && estado.visao === 'grade' ? '<button class="btn secondary sm" id="gerenciar">Setores e linhas</button>' : ''}
+    </div></div>`;
+}
+
+export async function render(el, ctx) {
+  const { usuario, dataBase, recarregar } = ctx;
   el.innerHTML = carregando(10);
   estado.dados = await api(`/api/projecao?data=${dataBase}`);
   estado.alteracoes.clear();
   const d = estado.dados;
+  const ligarAlternador = () => el.querySelectorAll('[data-visao]').forEach((b) => (b.onclick = () => {
+    if (b.dataset.visao === estado.visao || !sair()) return;
+    estado.visao = b.dataset.visao;
+    render(el, ctx);
+  }));
+  if (estado.visao === 'comparativo') {
+    const carga = comparativo.render(el, { usuario, dataBase, setores: d.setores, topo: topo(d, usuario) });
+    ligarAlternador();
+    return carga;
+  }
   estado.ano ??= d.mes_atual.slice(0, 4);
   if (estado.setor === null) estado.setor = d.setores.some((s) => s.codigo === usuario.perfil) ? usuario.perfil : '';
   const anos = [...new Set(d.meses.map((m) => m.slice(0, 4)))];
   const todas = d.setores.flatMap((s) => s.linhas);
   const somaMes = (m) => todas.reduce((a, l) => a + (l.valores[m] ?? 0), 0);
   const proximo = d.meses[d.meses.indexOf(d.mes_atual) + 1];
-  const editaveis = d.setores.filter((s) => s.editavel).map((s) => s.nome);
 
   el.innerHTML = `<div class="fade">
-    <div class="cabecalho"><div>
-      <div class="eyebrow">Projeção de custos</div><h2>Projeção por setor</h2>
-      <p>${editaveis.length === d.setores.length ? 'Você pode editar todos os setores.' : editaveis.length ? `Você edita: ${esc(editaveis.join(', '))}.` : 'Somente leitura.'}
-        Os totais por rubrica entram no "Projetado" do Resumo e do Painel.</p>
-    </div><div class="row-flex sem-impressao">
-      ${usuario.permissoes.administrar ? '<button class="btn secondary sm" id="gerenciar">Setores e linhas</button>' : ''}
-    </div></div>
+    ${topo(d, usuario)}
     <div class="kpis">
       <div class="card kpi"><p class="l">Projetado total</p><p class="v tab">${fmt.moeda(todas.reduce((a, l) => a + l.total, 0))}</p><p class="h">${todas.length} linhas ativas</p></div>
       <div class="card kpi destaque"><p class="l">Projetado no mês corrente</p><p class="v tab">${fmt.moeda(somaMes(d.mes_atual))}</p><p class="h">${fmt.mesLongo(d.mes_atual)}</p></div>
@@ -246,6 +269,7 @@ export async function render(el, { usuario, dataBase, recarregar }) {
   el.querySelectorAll('#anos [data-ano]').forEach((b) => (b.onclick = () => { estado.ano = b.dataset.ano; desenhar(); }));
   el.querySelector('#so-valor').onchange = (e) => { estado.soComValor = e.target.checked; desenhar(); };
   el.querySelector('#gerenciar')?.addEventListener('click', () => gerenciarLinhas(recarregar));
+  ligarAlternador();
 
   const gradeEl = el.querySelector('#grade');
   gradeEl.addEventListener('focusin', (e) => { if (e.target.matches('input:not([readonly])')) e.target.select(); });
@@ -268,7 +292,7 @@ export async function render(el, { usuario, dataBase, recarregar }) {
       const { salvos } = await api(`/api/projecao?data=${dataBase}`, { metodo: 'PUT', corpo: itens });
       estado.alteracoes.clear();
       toast('Projeção salva', { texto: `${salvos} valor(es) atualizados. Resumo e Painel já refletem a mudança.` });
-      await render(el, { usuario, dataBase, recarregar });
+      await render(el, ctx);
     } catch (erro) {
       erroToast(erro);
       botao.disabled = false;

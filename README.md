@@ -11,7 +11,7 @@ banco Postgres e login no **Supabase**; dados de origem lidos do SharePoint pelo
 
 ## 1. Deploy (Supabase + Vercel)
 
-1. **Supabase:** crie o projeto e rode `supabase/migrations/20261019120000_inicial.sql`
+1. **Supabase:** crie o projeto e rode, em ordem, os arquivos de `supabase/migrations/`
    (SQL Editor ou `supabase db push`). Todas as tabelas ficam com RLS ativo e sem policies:
    o acesso é só pelo backend.
 2. **Supabase › Authentication › URL Configuration:** em *Site URL* coloque a URL da Vercel
@@ -40,23 +40,47 @@ Ou `INICIAR_SISTEMA.bat`. Sem `DATABASE_URL`, o banco é SQLite em `data/`. Com
 `APORTE_AUTH_LOCAL=1` no `.env`, o login vira um seletor de perfil, sem Supabase. Esse modo
 só funciona com SQLite e nunca na Vercel.
 
+**Testar os acessos de cada perfil** (sem Supabase, sem mexer no banco de produção):
+```bash
+python -m backend.app.dev
+```
+Abre em http://127.0.0.1:8061 com SQLite (`data/`), login ligado e um usuário de teste por
+papel (admin, diretor e cada setor). O perfil é trocado no seletor do topo da tela. O Graph é o
+do `.env`, então "Atualizar do SharePoint" funciona como em produção.
+
 ---
 
 ## 3. Abas e perfis
 
 | Aba | Conteúdo | Quem acessa |
 |---|---|---|
-| Resumo | Dashboard: KPIs, formação do aporte do mês (cascata da fórmula Z9), aporte do próximo mês, consumo da viabilidade, custo do mês por rubrica, conta da SPE, aportes programados e a tabela completa | todos |
-| Painel | Realizado × Projetado × EVE (colunas A–F), verificação da planilha e linha do tempo jan/2024–dez/2030 | todos |
-| Projeção | Grade mensal por setor/linha; o total por rubrica alimenta o "Projetado" do Resumo e do Painel | todos veem; cada setor edita as suas linhas |
-| API's | Validador das 6 fontes, pendências de classificação, saldos bancários, viabilidade, usuários e histórico | diretor, adm |
+| Resumo | Layout da aba Resumo da planilha: tabela por rubrica e Relatório de Aporte (aporte do mês, conta da SPE, próximo mês e aportes programados) | admin, diretor |
+| Dashboards | Exposição de caixa (pontos A–D: investimento inicial, máxima exposição, primeiro fluxo positivo, equilíbrio), gasto × projetado, recebimentos, custos por rubrica, setores que mais gastaram e acerto da projeção | admin, diretor |
+| Painel | Realizado × Projetado × EVE (colunas A–F), verificação da planilha e linha do tempo jan/2024–dez/2030 | admin, diretor |
+| Projeção | Grade mensal por setor/linha; o total por rubrica alimenta o "Projetado" do Resumo e do Painel | todos; cada setor edita as suas linhas |
+| API's | Validador das 6 fontes, pendências de classificação, saldos bancários, viabilidade, usuários, permissões e histórico | admin, diretor |
 
-**Perfis:** `adm` (desenvolvedores), `diretor` (Diretoria) e um perfil por setor com o código do
-setor (`mkt`, `proj`, `inc`). Um setor novo (aba Projeção › Setores e linhas) cria o perfil
-correspondente. Setores só editam meses a partir do mês corrente; diretor e adm editam qualquer mês.
+**Permissões (padrão Unità v1):** tabelas `profiles`, `roles`, `permissions`,
+`role_permissions` e `user_roles` (migração `20261020150000_papeis_e_permissoes.sql`).
+
+| Papel | Quem | Permissões iniciais |
+|---|---|---|
+| `admin` | Desenvolvedores | todas (toda permissão nova nasce concedida ao admin) |
+| `diretor` | Diretoria | todas, menos `setores.gerenciar` e `usuarios.gerenciar` |
+| `mkt`, `proj`, `inc`… | um papel por setor, com o código do setor | `projecao.ver` |
+
+Permissões: `resumo.ver`, `dashboards.ver`, `painel.ver`, `projecao.ver`, `projecao.editar_todos_setores`,
+`projecao.editar_meses_passados`, `apis.ver`, `fontes.atualizar`, `fontes.classificar`,
+`saldos.editar`, `premissas.editar`, `setores.gerenciar` e `usuarios.gerenciar`. Quem tem
+`projecao.ver` edita as linhas dos setores dos seus papéis, a partir do mês corrente.
+
+Um setor novo (aba Projeção › Setores e linhas) cria o papel correspondente com `projecao.ver`.
+As concessões são ajustadas em API's › Permissões (matriz papel × permissão), sem deploy; o
+papel `admin` fica sempre com todas. O backend valida cada rota pela permissão; as funções
+`auth_has_permission`, `auth_is_admin` e `auth_my_permissions` ficam no banco para uso futuro.
 
 **Login (temporariamente inativo):** com `APORTE_LOGIN_ATIVO` ausente ou `0`, não há tela de
-login: todos entram com o perfil `APORTE_PERFIL_SEM_LOGIN` (padrão `adm`) e a gestão de usuários
+login: todos entram com o perfil `APORTE_PERFIL_SEM_LOGIN` (padrão `admin`) e a gestão de usuários
 fica indisponível. Para reativar, defina `APORTE_LOGIN_ATIVO=1` (Vercel e `.env`) e faça um novo deploy.
 
 **Login (quando ativo):** Supabase Auth (e-mail e senha). O navegador envia o access token (JWT) para a API,
@@ -86,6 +110,11 @@ A **data-base** no topo substitui o `HOJE()` da planilha.
 
 ---
 
+**Leitura do SharePoint:** o `usedRange` traz o que estiver abaixo da tabela (linha de total,
+notas). Linhas sem nenhum identificador (empresa, número, data...) são ignoradas e contadas em
+`ignoradas` na aba API's. Antes da correção, o total de "Controle Entradas" (2.117.312,68) e
+outro valor solto (1.130.800) entravam como Aporte Holding e inflavam o Saldo de Caixa do Painel.
+
 ## 5. Estrutura
 
 ```
@@ -102,7 +131,7 @@ sistema/
 │   ├── db.py               Postgres (Supabase) ou SQLite, com o mesmo SQL
 │   ├── auth.py             JWT do Supabase, Admin API, perfis e permissões
 │   ├── servicos.py         casos de uso (fontes, cálculo, projeção, cadastros, migração)
-│   ├── migrar.py           carga da planilha e criação do primeiro adm
+│   ├── migrar.py           carga da planilha e criação do primeiro admin
 │   └── main.py             API REST
 ├── backend/tests/          regressão contra o Excel, API, JWT e Graph real
 └── public/                 interface (HTML, CSS com tokens Joy+, JS em módulos)
@@ -132,21 +161,40 @@ Os testes usam SQLite; o mesmo SQL roda no Postgres do Supabase.
 
 ## 7. Diferenças e comportamentos da planilha
 
-**Diferença intencional:** o custo do próximo mês (Resumo Z22) é digitado na planilha; no
-sistema é **automático** (projeção dos setores + contas a pagar do próximo mês, coluna S). Assim o
-aporte do próximo mês sai calculado. O teste de regressão usa o valor digitado para provar que o
-restante bate com o Excel.
+**Regra do aporte:** aporte do mês = custos do mês (pago + a pagar + projetado) + caixa mínimo
+(R$ 100 mil) − saldo bancário do fim do mês anterior − receitas do mês; nunca negativo.
+Divisão: 85% investidor e 15% Joy+. Tudo segue o mês da data-base: qualquer data dentro do mês
+entra naquele mês (fim de mês).
 
-Comportamentos da planilha mantidos de propósito (cobertos pela regressão):
+**Correções aprovadas em relação à planilha (out/2026):**
+
+1. **Controle Saídas** entram pelo mês da data. A planilha só contava como "Pago no Mês" a
+   saída do último dia do mês; as demais caíam em "Pago Total até" o mês anterior.
+2. **Receita do mês** não inclui entradas classificadas como Aporte / Aporte Holding.
+3. **Conta da SPE** é o fluxo do mês: saldo inicial + receitas + aporte − custos = saldo final
+   (o caixa mínimo, quando há aporte), com os aportes já recebidos no mês e o que falta receber.
+   A planilha usava o saldo de dois meses antes, todos os recebimentos desde o início e uma
+   base fixa de 780.000 (Z13:Z18).
+4. **Aporte do próximo mês** segue a mesma regra, a partir do saldo final projetado e da
+   receita projetada. A planilha partia do saldo do item 3 e ignorava a receita (Z24).
+5. **Custo do próximo mês** (Z22) é automático: projeção dos setores + contas a pagar do
+   próximo mês (coluna S). Na planilha é digitado.
+6. Rótulo corrigido: "Total Mês (Pago + A Pagar)" (a fórmula é J + L).
+7. **Aportes programados** (Y32:Y43) viraram o **cronograma do aporte do mês**: o aporte
+   necessário é dividido em 1 a 12 parcelas com data no mês. Cada parcela guarda o percentual
+   do aporte; a última fica com o restante, então a soma é sempre o aporte do mês, mesmo que os
+   custos mudem. O status (recebido, parcial, a receber) compara com os aportes já recebidos
+   no mês. Sem cronograma, é parcela única no dia 1. Na planilha eram dois valores fixos de
+   425.000 rotulados "85% Joy+ · 15% Bapema"; aqui a divisão é Investidor 85% · Joy+ 15%.
+
+O teste de regressão compara todas as demais células com o Excel e calcula, a partir dos
+dados, a diferença esperada do item 1. `test_regras_aporte.py` cobre as regras acima.
+
+Comportamentos da planilha mantidos (cobertos pela regressão):
 
 1. **Painel, coluna B (Projetado Mês)** filtra o tipo "Projetado (Mês)", que nenhuma linha usa: é sempre 0.
 2. **Painel, coluna C (Projetado Total)** soma a projeção de **todos** os meses, inclusive os passados.
 3. **Linha do tempo de custos/despesas**: em 2024 o sinal não é invertido. Em meses passados sem
    realizado, entra o projetado do mês.
-4. **Resumo, Saídas**: "Pago Total até" usa `Data_es <` fim do mês corrente; "Pago no Mês" exige
-   `Data_es` igual ao último dia do mês.
-5. **Resumo Z17** (base 780.000) e **Painel H119** (ajuste 372.288,53) são premissas editáveis.
-6. **"Total Mês (Incorrido + Projetado)"** é, pela fórmula, Pago no Mês + Contas a Pagar.
-7. **Aportes programados**: 85% rotulado "Joy+" e 15% "Bapema", enquanto o bloco do aporte chama
-   85% de "Investidor" e 15% de "Joy+".
-8. **Painel L101** e **J122** dão `#VALUE!` na planilha e aparecem como `#VALOR!`.
+4. **Painel H119** (ajuste 372.288,53) é premissa editável.
+5. **Painel L101** e **J122** dão `#VALUE!` na planilha e aparecem como `#VALOR!`.

@@ -2,20 +2,23 @@
 import { api, erroToast, esc, modal, toast } from './util.js';
 import * as sessao from './sessao.js';
 import * as resumo from './telas/resumo.js';
+import * as dashboards from './telas/dashboards.js';
 import * as painel from './telas/painel.js';
 import * as projecao from './telas/projecao.js';
 import * as apis from './telas/apis.js';
 
 const ABAS = [
-  { id: 'resumo', titulo: 'Resumo', tela: resumo },
-  { id: 'painel', titulo: 'Painel', tela: painel },
-  { id: 'projecao', titulo: 'Projeção', tela: projecao },
-  { id: 'apis', titulo: "API's", tela: apis, permissao: 'ver_apis' },
+  { id: 'resumo', titulo: 'Resumo', tela: resumo, permissao: 'resumo.ver' },
+  { id: 'dashboards', titulo: 'Dashboards', tela: dashboards, permissao: 'dashboards.ver' },
+  { id: 'painel', titulo: 'Painel', tela: painel, permissao: 'painel.ver' },
+  { id: 'projecao', titulo: 'Projeção', tela: projecao, permissao: 'projecao.ver' },
+  { id: 'apis', titulo: "API's", tela: apis, permissao: 'apis.ver' },
 ];
 const raiz = document.getElementById('raiz');
 const hojeIso = () => new Date().toLocaleDateString('sv-SE');
 const estado = { usuario: null, dataBase: hojeIso(), abaAtual: null };
 
+const emBreve = (aba) => (estado.usuario.em_breve || []).includes(aba.id);
 const abasVisiveis = () => ABAS.filter((a) => !a.permissao || estado.usuario.permissoes[a.permissao]);
 
 // ------------------------------------------------------------------ telas de acesso
@@ -85,19 +88,27 @@ function montarShell() {
   const u = estado.usuario;
   raiz.innerHTML = `
     <header class="app"><div class="in">
-      <img class="logo" src="/assets/logo-joy-branco.png" alt="Joy+" />
-      <nav aria-label="Abas">${abasVisiveis().map((a) => `<a href="#${a.id}" data-aba="${a.id}">${esc(a.titulo)}</a>`).join('')}</nav>
+      <img class="logo" src="/assets/logo-joy.png" alt="Joy+" />
+      <nav aria-label="Abas">${abasVisiveis().map((a) => `<a href="#${a.id}" data-aba="${a.id}">${esc(a.titulo)}${emBreve(a) ? ' <span class="badge b-neutral em-breve">Em breve</span>' : ''}</a>`).join('')}</nav>
       <div class="direita">
         <label class="data-base" title="Data usada como 'hoje' nos cálculos (a planilha usa HOJE())">
           <span>Data-base</span><input type="date" id="data-base" value="${estado.dataBase}" />
         </label>
-        <div class="u"><b>${esc(u.nome)}</b><span>${esc(u.perfil_nome)}</span></div>
+        ${sessao.modoLocal() ? `<label class="troca-perfil" title="Modo local: troque de perfil para testar os acessos">
+          <span>Perfil</span><select id="trocar-perfil">${sessao.usuariosLocais().map((l) => `<option value="${esc(l.usuario_id)}" ${l.usuario_id === u.usuario_id ? 'selected' : ''}>${esc(l.nome)}</option>`).join('')}</select></label>`
+          : `<div class="u"><b>${esc(u.nome)}</b><span>${esc(u.perfil_nome)}</span></div>`}
         ${sessao.modoLocal() || sessao.semLogin() ? '' : '<button class="btn inverse sm" id="conta">Conta</button>'}
         ${sessao.semLogin() ? '' : '<button class="btn inverse sm" id="sair">Sair</button>'}
       </div>
     </div></header>
-    ${sessao.modoLocal() ? '<div class="alert a-warning faixa-local"><b>Modo local de desenvolvimento</b> · sem Supabase, dados em SQLite.</div>' : ''}
+    ${sessao.modoLocal() ? `<div class="alert a-warning faixa-local"><b>Modo local de teste</b> · perfil <b>${esc(u.perfil_nome)}</b> (${esc(u.perfil)}) · sem Supabase, dados em SQLite.</div>` : ''}
     <main id="conteudo"></main>`;
+  document.getElementById('trocar-perfil')?.addEventListener('change', (e) => {
+    if (estado.abaAtual?.tela.sair && !estado.abaAtual.tela.sair()) { e.target.value = u.usuario_id; return; }
+    estado.abaAtual = null;
+    sessao.entrarLocal(e.target.value);
+    iniciar();
+  });
   document.getElementById('sair')?.addEventListener('click', async () => { await sessao.sair(); telaLogin(); });
   document.getElementById('conta')?.addEventListener('click', () => modal({
     titulo: 'Trocar senha',
@@ -114,13 +125,23 @@ function montarShell() {
 async function renderizar() {
   const abas = abasVisiveis();
   const aba = abas.find((a) => a.id === location.hash.slice(1)) || abas[0];
+  const conteudo = document.getElementById('conteudo');
+  if (!aba) {
+    conteudo.innerHTML = `<div class="card empty"><h3>Sem abas liberadas</h3>
+      <p>Seu perfil ainda não tem acesso a nenhuma aba. Fale com a Controladoria.</p></div>`;
+    return;
+  }
   if (estado.abaAtual?.tela.sair && estado.abaAtual !== aba && !estado.abaAtual.tela.sair()) {
     location.hash = estado.abaAtual.id;       // alterações não salvas
     return;
   }
   estado.abaAtual = aba;
   document.querySelectorAll('header.app nav a').forEach((a) => a.classList.toggle('on', a.dataset.aba === aba.id));
-  const conteudo = document.getElementById('conteudo');
+  if (emBreve(aba)) {
+    conteudo.innerHTML = `<div class="card empty fade"><span class="badge b-primary">Em breve</span>
+      <h3>${esc(aba.titulo)} em construção</h3><p>Esta aba está sendo preparada e logo estará disponível.</p></div>`;
+    return;
+  }
   try {
     await aba.tela.render(conteudo, { usuario: estado.usuario, dataBase: estado.dataBase, recarregar: renderizar });
   } catch (erro) {

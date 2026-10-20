@@ -81,7 +81,6 @@ LINHAS_RESUMO = _linhas_resumo()
 @dataclass
 class Premissas:
     caixa_minimo: float = 100000            # Resumo Z8
-    aporte_referencia: float = 780000       # Resumo Z17 (=780000-Z14)
     receita_projetada_proximo: float = 0    # Resumo Z21
     # Resumo Z22. Na planilha é digitado; no sistema, None = automático
     # (projetado + contas a pagar do próximo mês, coluna S do Resumo).
@@ -90,10 +89,10 @@ class Premissas:
     participacao_investidor: float = 0.85   # Resumo Z10/Z25 e Y34/Y38
     participacao_joy: float = 0.15          # Resumo Z11/Z26 e Y35/Y39
     ajuste_saldo_banco: float = 372288.53   # Painel H119 (constante somada ao saldo)
-    aportes_programados: list[dict] = field(default_factory=lambda: [
-        {"titulo": "Aporte 01 (01/10)", "valor": 425000},
-        {"titulo": "Aporte 02 (15/10)", "valor": 425000},
-    ])
+    # Cronograma do aporte do mês (Resumo Y32:Y43): "AAAA-MM" → parcelas [{"data", "percentual"}].
+    # O percentual é do aporte necessário do mês, então as parcelas sempre somam o aporte.
+    # Mês sem cronograma: parcela única no dia 1.
+    cronogramas_aporte: dict[str, list[dict]] = field(default_factory=dict)
 
     def como_dict(self) -> dict:
         return dict(self.__dict__)
@@ -134,7 +133,7 @@ PREMISSAS_DESEMBOLSO = {
 # D43, AI43 e CC43 = "Terreno"; AS43 = "OU". Chave = índice do mês na linha do tempo.
 ROTULO_ENTRADAS_CUSTOS_POR_MES = {0: "Terreno", 27: "Terreno", 37: "OU", 73: "Terreno"}
 
-# --- Setores e linhas de projeção (carga inicial; editável pelo adm) -------------
+# --- Setores e linhas de projeção (carga inicial; editável pelo admin) -------------
 SETORES_PADRAO = [
     {"codigo": "mkt", "nome": "Marketing", "linhas": [("Marketing", "Marketing e Publicidade")]},
     {"codigo": "proj", "nome": "Projetos", "linhas": [(nome, "Projetos") for nome in [
@@ -163,4 +162,33 @@ SETORES_PADRAO = [
         ("Instituição/Averbação de Condomínio", "Despesas de Incorporação"),
     ]},
 ]
-PERFIS_GERAIS = {"diretor": "Diretoria", "adm": "Desenvolvedores"}
+# --------------------------------------------------------------------- papéis e permissões
+# Padrão de permissões Unità: papéis (roles), permissões e concessões por usuário (user_roles).
+# Cada setor é um papel com a mesma chave do código do setor (mkt, proj, inc...).
+PAPEL_ADMIN = "admin"
+PAPEIS_GERAIS = {
+    PAPEL_ADMIN: ("Administrador", "Desenvolvedores: acesso total ao app"),
+    "diretor": ("Diretoria", "Vê todas as abas e edita todos os setores e meses"),
+}
+PERMISSOES = {
+    "resumo.ver": "Ver a aba Resumo",
+    "dashboards.ver": "Ver a aba Dashboards",
+    "painel.ver": "Ver a aba Painel",
+    "projecao.ver": "Ver a aba Projeção e editar as linhas do próprio setor",
+    "projecao.editar_todos_setores": "Editar a projeção de qualquer setor",
+    "projecao.editar_meses_passados": "Editar meses anteriores ao corrente",
+    "apis.ver": "Ver a aba API's (fontes, pendências, saldos, viabilidade e histórico)",
+    "fontes.atualizar": "Atualizar as fontes (SharePoint ou Excel)",
+    "fontes.classificar": "Classificar lançamentos pendentes (DePara)",
+    "saldos.editar": "Lançar e excluir saldos bancários",
+    "premissas.editar": "Editar premissas do aporte e viabilidade",
+    "setores.gerenciar": "Criar e alterar setores e linhas de projeção",
+    "usuarios.gerenciar": "Gerenciar usuários, papéis e permissões dentro do app",
+}
+PERMISSOES_PADRAO = {                       # concedidas quando o papel é criado
+    PAPEL_ADMIN: list(PERMISSOES),
+    "diretor": [p for p in PERMISSOES if p not in ("setores.gerenciar", "usuarios.gerenciar")],
+}
+PERMISSOES_SETOR = ["projecao.ver"]         # papel de setor novo
+# Abas ainda em construção: aparecem como "Em breve" para todos, menos para o papel admin.
+ABAS_EM_BREVE = ["dashboards", "painel"]

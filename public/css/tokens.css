@@ -10,14 +10,15 @@
   --color-brand-sand: #e2d9d6;
   --color-brand-violet: #bf55ff;
 
-  /* Semântica. O roxo da marca tem contraste 4,5:1 com branco; botões e textos
-     usam o tom mais escuro (5,6:1) para cumprir AA em qualquer tamanho. */
-  --color-primary: #6a45f0;
-  --color-primary-hover: #5b37e0;
-  --color-primary-soft: #f1edff;
-  /* Barras de destaque (header, seções): o roxo mais claro da paleta, no lugar do azul. */
-  --color-secondary: var(--color-brand-violet);
-  --color-secondary-soft: #f6ecff;
+  /* Semântica. Roxo "empoeirado" derivado do 2090C: mesma matiz da marca, menos saturado,
+     agradável em áreas grandes e com contraste AA (5,1:1) com branco. */
+  --color-primary: #6e5fc9;
+  --color-primary-hover: #5f51b8;
+  --color-primary-soft: #f0eefa;
+  --color-primary-ring: rgb(110 95 201 / .22);
+  /* Header e faixas de seção: superfície clara com toque de lilás, em vez de barra saturada. */
+  --color-secondary: #f7f6fc;
+  --color-secondary-soft: #f4f2fa;
 
   /* Neutros quentes (harmonizam com a areia da marca) */
   --ink-50: #f8f7f6; --ink-100: #f0eeec; --ink-200: #e2dfdc; --ink-300: #c9c4c0; --ink-400: #a19b96;
@@ -39,12 +40,13 @@
   --cell-current: var(--color-primary-soft);
   --cell-locked: var(--ink-50);
 
-  /* Séries de gráfico (ordem fixa, validada para daltonismo): roxo → turquesa → lilás.
-     Sem azul. Entradas/saídas do cálculo do aporte usam lilás e ink-400. */
-  --chart-1: var(--color-primary);
-  --chart-2: var(--color-brand-teal);
-  --chart-3: var(--color-brand-violet);
-  --chart-neutro: var(--ink-400);
+  /* Séries de gráfico, em ordem fixa. Validadas com o validate_palette do dataviz (claro):
+     daltonismo ΔE 9,4 e visão normal ΔE 20,2. Contraste < 3:1: sempre com rótulo ou tabela.
+     Roxo 2090C → turquesa → lilás (#BF55FF suavizado). Sem azul. */
+  --chart-1: #7c6ad6;
+  --chart-2: #16a6ad;
+  --chart-3: #d58ae8;
+  --chart-neutro: var(--ink-300);
   --chart-trilho: var(--ink-100);
 
   --sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;

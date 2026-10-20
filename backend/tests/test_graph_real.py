@@ -10,7 +10,7 @@ import os
 import pytest
 
 from backend.app.fontes.definicoes import FONTES
-from backend.app.fontes.graph import ClienteGraph
+from backend.app.fontes.graph import ClienteGraph, ErroGraph
 from backend.app.fontes.normalizacao import normalizar, tabela_para_dicts
 
 pytestmark = pytest.mark.skipif(os.environ.get("APORTE_TESTE_GRAPH") != "1",
@@ -35,3 +35,8 @@ def test_rota(graph, fonte):
     assert len(valores) > 1, "aba sem linhas"
     resultado = normalizar(fonte.codigo, tabela_para_dicts(valores), {})
     assert not resultado.colunas_ausentes, resultado.colunas_ausentes
+
+
+def test_aba_inexistente_diz_qual_arquivo_esta_configurado(graph):
+    with pytest.raises(ErroGraph, match="não existe no arquivo configurado"):
+        graph.ler_aba("Aba que não existe")

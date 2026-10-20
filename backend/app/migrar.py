@@ -27,7 +27,7 @@ def main(argumentos: list[str]) -> None:
         print(json.dumps(relatorio, ensure_ascii=False, indent=2, default=str))
     elif comando == "admin" and len(argumentos) >= 3:
         senha = argumentos[3] if len(argumentos) > 3 else None
-        usuario_id = servico.criar_usuario(argumentos[1], argumentos[2], "adm", senha, None)
+        usuario_id = servico.criar_usuario(argumentos[1], argumentos[2], "admin", senha, None)
         print(f"Administrador criado: {argumentos[1]} ({usuario_id})")
     else:
         print(__doc__)

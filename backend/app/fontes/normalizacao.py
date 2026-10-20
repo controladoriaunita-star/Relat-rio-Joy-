@@ -16,6 +16,7 @@ from .definicoes import FONTES_POR_CODIGO, Fonte
 class ResultadoFonte:
     registros: list = field(default_factory=list)
     pendentes: list[dict] = field(default_factory=list)    # linhas sem classificação
+    ignoradas: int = 0                                      # linhas fora da tabela (totais, notas)
     colunas_ausentes: list[str] = field(default_factory=list)
     linhas_lidas: int = 0
 
@@ -57,6 +58,19 @@ def _inteiro(valor) -> int | None:
         return None
 
 
+COLUNAS_DE_VALOR = {"TotalLiquido", "Valor_es", "Valor_tb", "Valor_Líquido"}
+
+
+def _vazio(valor) -> bool:
+    return valor is None or (isinstance(valor, str) and not valor.strip())
+
+
+def fora_da_tabela(fonte: Fonte, linha: dict) -> bool:
+    """O usedRange do SharePoint traz o que estiver abaixo da tabela (linha de total, notas).
+    Linha sem nenhum identificador (empresa, número, data...) não é lançamento."""
+    return all(_vazio(linha.get(c)) for c in fonte.colunas if c not in COLUNAS_DE_VALOR)
+
+
 def _texto(valor) -> str | None:
     return None if valor is None else str(valor)
 
@@ -70,7 +84,10 @@ def normalizar(codigo: str, linhas: list[dict], depara: dict[str, str]) -> Resul
         return resultado
 
     for linha in linhas:
-        classificacao = None
+        if fora_da_tabela(fonte, linha):
+            resultado.ignoradas += 1
+            continue
+        classificacao = concat = None
         if fonte.chave:
             concat = chave_concat(fonte, linha)
             classificacao = depara.get(concat.casefold()) or _texto(linha.get("Classificação")) or None
@@ -81,7 +98,8 @@ def normalizar(codigo: str, linhas: list[dict], depara: dict[str, str]) -> Resul
         if codigo in ("custos_spe", "custos_nn"):
             data = como_data(linha["DataPagamento"])
             registro = Desembolso(classificacao, _texto(linha["Status"]), data, eomonth(data),
-                                  como_numero(linha["TotalLiquido"]))
+                                  como_numero(linha["TotalLiquido"]), _texto(linha.get("Fornecedor")),
+                                  _texto(linha.get("Insumo")), concat)
         elif codigo in ("saidas", "entradas"):
             data = como_data(linha["Data_es"])
             registro = Movimento(classificacao, data, eomonth(data), como_numero(linha["Valor_es"]),

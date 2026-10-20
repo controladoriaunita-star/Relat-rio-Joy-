@@ -1,5 +1,5 @@
 // Aba Painel: realizado x projetado x EVE e linha do tempo mensal (jan/2024 a dez/2030).
-import { api, carregando, ehNumero, esc, fmt, focarMesCorrente } from '../util.js';
+import { api, carregando, ehNumero, esc, fmt, focarMesCorrente, montarGrafico } from '../util.js';
 
 // Ordem e estilo das linhas, seguindo a aba Painel da planilha.
 const SECOES = [
@@ -69,7 +69,7 @@ function tabelaLinhaDoTempo(dados) {
   const cab = indices.map(([m], j) => `<th class="${m === corte ? 'cur' : ''} ${m.endsWith('-01-31') && j ? 'ano-inicio' : ''}">${fmt.mes(m)}</th>`).join('');
   let corpo = '';
   for (const secao of [...SECOES, { titulo: 'Acumulados', linhas: [[122, 'total']] }]) {
-    corpo += `<tr class="secao"><td class="first" colspan="${indices.length + 3}">${secao.titulo}</td></tr>`;
+    corpo += `<tr class="secao"><td class="first">${secao.titulo}</td><td colspan="${indices.length + 2}"></td></tr>`;
     for (const item of secao.linhas) {
       const [r, estilo] = Array.isArray(item) ? item : [item, ''];
       const l = linhas[r];
@@ -85,36 +85,40 @@ function tabelaLinhaDoTempo(dados) {
       <span><i style="background:#fff;border-color:var(--color-primary)"></i><span style="color:var(--color-primary)">Valores em roxo</span>: meses futuros (projeção)</span></div>`;
 }
 
-/** Barras do saldo de caixa mensal + linha do saldo acumulado. */
-function grafico(dados) {
+/** Barras do saldo de caixa mensal + linha do saldo acumulado, na largura real do card. */
+function grafico(dados, L) {
   const linhas = Object.fromEntries(dados.linhas.map((l) => [l.linha_excel, l]));
   const mensal = linhas[93].tl.map((v) => v ?? 0);
   const acumulado = linhas[95].tl.map((v) => v ?? 0);
-  const L = 960, A = 220, m = { e: 64, d: 16, t: 12, b: 28 };
+  const A = 200, m = { e: 56, d: 8, t: 10, b: 24 };
   const maxAbs = Math.max(1, ...mensal.map(Math.abs), ...acumulado.map(Math.abs));
-  const y = (v) => m.t + (A - m.t - m.b) / 2 - (v / maxAbs) * ((A - m.t - m.b) / 2);
+  const meio = (A - m.t - m.b) / 2;
+  const y = (v) => m.t + meio - (v / maxAbs) * meio;
   const passo = (L - m.e - m.d) / mensal.length;
+  const folga = Math.min(2, passo * 0.25);
   const barras = mensal.map((v, i) => {
     const y0 = y(0), y1 = y(v);
-    return `<rect x="${(m.e + i * passo + 1).toFixed(1)}" y="${Math.min(y0, y1).toFixed(1)}" width="${(passo - 2).toFixed(1)}" height="${Math.max(Math.abs(y1 - y0), 0.5).toFixed(1)}" rx="1.5"><title>${fmt.mes(dados.meses[i])}: ${fmt.moeda(v)}</title></rect>`;
+    return `<rect x="${(m.e + i * passo + folga / 2).toFixed(1)}" y="${Math.min(y0, y1).toFixed(1)}" width="${Math.max(passo - folga, 1).toFixed(1)}" height="${Math.max(Math.abs(y1 - y0), 0.5).toFixed(1)}" rx="1"><title>${fmt.mes(dados.meses[i])}: ${fmt.moeda(v)}</title></rect>`;
   }).join('');
   const pontos = acumulado.map((v, i) => `${(m.e + i * passo + passo / 2).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const anos = dados.meses.map((mm, i) => (mm.endsWith('-01-31') ? `<text x="${m.e + i * passo}" y="${A - 8}">${mm.slice(0, 4)}</text>` : '')).join('');
+  const anos = dados.meses.map((mm, i) => (mm.endsWith('-01-31')
+    ? `<line x1="${m.e + i * passo}" x2="${m.e + i * passo}" y1="${m.t}" y2="${A - m.b}" stroke="var(--ink-100)"/>
+       <text x="${m.e + i * passo + 4}" y="${A - 8}">${mm.slice(0, 4)}</text>` : '')).join('');
   const iCorte = dados.meses.indexOf(dados.datas.corte);
-  return `<div class="card pad" style="margin-bottom:16px"><p class="sub">Saldo de caixa: mensal (barras) e acumulado (linha)</p>
-    <svg viewBox="0 0 ${L} ${A}" width="100%" role="img" aria-label="Saldo de caixa mensal e acumulado">
-      <line x1="${m.e}" x2="${L - m.d}" y1="${y(0)}" y2="${y(0)}" stroke="var(--ink-200)"/>
+  const eixo = [maxAbs, 0, -maxAbs].map((v) => `<text x="${m.e - 8}" y="${y(v) + 4}" text-anchor="end">${v ? fmt.compacto(v) : '0'}</text>`).join('');
+  return `<svg viewBox="0 0 ${L} ${A}" width="${L}" height="${A}" role="img" aria-label="Saldo de caixa mensal e acumulado" class="grafico">
+      <g font-size="11" fill="var(--muted)" font-family="Inter">${anos}${eixo}</g>
       ${iCorte >= 0 ? `<rect x="${m.e + iCorte * passo}" y="${m.t}" width="${passo}" height="${A - m.t - m.b}" fill="var(--cell-current)"/>` : ''}
+      <line x1="${m.e}" x2="${L - m.d}" y1="${y(0)}" y2="${y(0)}" stroke="var(--ink-200)"/>
       <g fill="var(--chart-1)">${barras}</g>
-      <polyline points="${pontos}" fill="none" stroke="var(--chart-2)" stroke-width="2"/>
-      <g font-size="11" fill="var(--muted)" font-family="Inter">${anos}
-        <text x="${m.e - 8}" y="${y(maxAbs) + 4}" text-anchor="end">${fmt.numero(maxAbs / 1e6)} mi</text>
-        <text x="${m.e - 8}" y="${y(0) + 4}" text-anchor="end">0</text>
-        <text x="${m.e - 8}" y="${y(-maxAbs) + 4}" text-anchor="end">-${fmt.numero(maxAbs / 1e6)} mi</text></g>
-    </svg>
+      <polyline points="${pontos}" fill="none" stroke="var(--chart-2)" stroke-width="2" stroke-linejoin="round"/>
+    </svg>`;
+}
+
+const cartaoGrafico = `<div class="card pad" style="margin-bottom:16px"><p class="sub">Saldo de caixa: mensal (barras) e acumulado (linha)</p>
+    <div class="grafico-area" id="grafico-caixa"></div>
     <div class="legend"><span><i style="background:var(--chart-1);border:0"></i>Saldo de caixa do mês</span>
       <span><i style="background:var(--chart-2);border:0;height:3px;vertical-align:3px"></i>Acumulado</span></div></div>`;
-}
 
 export async function render(el, { dataBase }) {
   el.innerHTML = carregando(12);
@@ -126,8 +130,11 @@ export async function render(el, { dataBase }) {
 
   const desenhar = () => {
     el.querySelector('#visao').innerHTML = visao === 'consolidado' ? tabelaConsolidado(dados)
-      : grafico(dados) + tabelaLinhaDoTempo(dados);
-    if (visao !== 'consolidado') focarMesCorrente(el.querySelector('#visao'));
+      : cartaoGrafico + tabelaLinhaDoTempo(dados);
+    if (visao !== 'consolidado') {
+      montarGrafico(el.querySelector('#grafico-caixa'), (largura) => grafico(dados, largura));
+      focarMesCorrente(el.querySelector('#visao'));
+    }
     el.querySelector('#anos').hidden = visao === 'consolidado';
     el.querySelectorAll('[data-visao]').forEach((b) => b.classList.toggle('on', b.dataset.visao === visao));
     el.querySelectorAll('[data-ano]').forEach((b) => b.classList.toggle('on', b.dataset.ano === (anoSelecionado || '')));

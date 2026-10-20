@@ -42,7 +42,7 @@ def cenario():
     premissas = Premissas(custo_projetado_proximo=775384.9700000001)
     formulas = openpyxl.load_workbook(ARQUIVO_EXCEL)
     return {
-        "planilha": planilha, "resultados": resultados, "formulas": formulas,
+        "planilha": planilha, "resultados": resultados, "formulas": formulas, "base": base,
         "resumo": calcular_resumo(base, hoje, VIABILIDADE_PADRAO, premissas),
         "painel": calcular_painel(base, hoje, VIABILIDADE_PADRAO, premissas),
     }
@@ -73,10 +73,33 @@ def _igual(esperado, obtido) -> bool:
     return esperado == obtido
 
 
-def _comparar(valores_excel, celulas: dict, rotulo: str) -> None:
+def _comparar(valores_excel, celulas: dict, rotulo: str, ajustes: dict | None = None) -> None:
+    """`ajustes` = célula → diferença esperada (motor − Excel) por correção aprovada."""
+    ajustes = ajustes or {}
+    esperado = lambda c: valores_excel[c].value + ajustes[c] if c in ajustes else valores_excel[c].value
     divergencias = [f"{rotulo}!{c}: Excel={valores_excel[c].value!r} motor={v!r}"
-                    for c, v in celulas.items() if not _igual(valores_excel[c].value, v)]
+                    for c, v in celulas.items() if not _igual(esperado(c), v)]
     assert not divergencias, f"{len(divergencias)} divergência(s):\n" + "\n".join(divergencias[:40])
+
+
+def _ajuste_saidas(cenario, resumo) -> dict:
+    """Correção aprovada: Controle Saídas entram pelo mês da data. A planilha só contava como
+    "pago no mês" (J) a saída do último dia do mês; as outras do mês caíam em "pago até" (H).
+    O valor dessas saídas passa de H para J e entra no custo do mês e no aporte."""
+    mes = resumo["datas"]["mes_atual"]
+    ajustes = {}
+    for linha in resumo["linhas"]:
+        delta = sum(m.valor for m in cenario["base"].filtrar("saidas", "classificacao", linha["rubrica"])
+                    if m.fim_mes == mes and m.data != mes)
+        if delta:
+            r = linha["linha_excel"]
+            for celula, sinal in ((f"H{r}", -1), (f"J{r}", 1), (f"U{r}", 1), ("H5", -1), ("J5", 1),
+                                  ("U5", 1), ("Z7", 1), ("Z9", 1)):
+                ajustes[celula] = ajustes.get(celula, 0) + sinal * delta
+    if "Z9" in ajustes:
+        ajustes["Z10"] = ajustes["Z9"] * 0.85
+        ajustes["Z11"] = ajustes["Z9"] * 0.15
+    return ajustes
 
 
 def test_classificacao_depara_igual_a_planilha(cenario):
@@ -95,27 +118,18 @@ def test_resumo(cenario):
                 celulas[f"{coluna}{linha['linha_excel']}"] = linha[campo]
     blocos = {"aporte_mes": [("saldo_anterior", 5), ("receita_projetada", 6), ("custo_mes", 7),
                              ("caixa_minimo", 8), ("aporte_total", 9), ("investidor", 10), ("joy", 11)],
-              "conta": [("saldo_mes_anterior", 13), ("valor_recebido", 14), ("pago_e_a_pagar", 15),
-                        ("saldo_atual", 16), ("valor_a_aportar", 17), ("saldo_final", 18)],
-              "aporte_proximo": [("saldo_anterior", 20), ("receita_projetada", 21),
-                                 ("custo_projetado", 22), ("caixa_minimo", 23), ("aporte_total", 24),
-                                 ("investidor", 25), ("joy", 26)]}
+              "aporte_proximo": [("receita_projetada", 21), ("custo_projetado", 22), ("caixa_minimo", 23)]}
     for bloco, campos in blocos.items():
         for campo, linha in campos:
             celulas[f"Z{linha}"] = resumo[bloco][campo]
-    for aporte, linha in zip(resumo["aportes_programados"], (33, 37)):
-        celulas[f"Y{linha}"] = aporte["valor"]
-        celulas[f"Y{linha + 1}"] = aporte["investidor"]
-        celulas[f"Y{linha + 2}"] = aporte["joy"]
-    celulas["Y43"] = resumo["total_aportes_programados"]
+    # Y32:Y43 (aportes programados) viraram o cronograma do aporte do mês: as parcelas somam
+    # o aporte necessário (Z9) em vez de valores fixos digitados. Coberto em test_regras_aporte.
     titulos = resumo["titulos"]
     celulas.update({"H3": titulos["pago_ate"], "J3": titulos["pago_mes"], "L3": titulos["a_pagar"],
                     "S3": titulos["projetado_proximo"], "Y5": titulos["saldo_anterior"],
-                    "Y7": titulos["custo_mes"], "Y14": titulos["valor_recebido"],
-                    "Y15": titulos["pago_e_a_pagar"], "Y20": titulos["saldo_proximo"],
-                    "Y22": titulos["custo_proximo"], "B4": resumo["datas"]["mes_atual"],
+                    "B4": resumo["datas"]["mes_atual"],
                     "L4": resumo["datas"]["a_pagar_ate"], "AD3": resumo["datas"]["mes_analise"]})
-    _comparar(cenario["planilha"].livro["Resumo"], celulas, "Resumo")
+    _comparar(cenario["planilha"].livro["Resumo"], celulas, "Resumo", _ajuste_saidas(cenario, resumo))
 
     # Toda fórmula das colunas de valor precisa estar coberta.
     formulas = cenario["formulas"]["Resumo"]

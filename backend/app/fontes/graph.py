@@ -50,12 +50,24 @@ class ClienteGraph:
         carga += "=" * (-len(carga) % 4)
         return json.loads(base64.urlsafe_b64decode(carga)).get("roles") or []
 
+    def _get(self, caminho: str, timeout: int = 120) -> requests.Response:
+        url = URL_ITEM.format(drive=config.GRAPH_DRIVE_ID, item=config.GRAPH_ITEM_ID) + caminho
+        return self._sessao.get(url, headers={"Authorization": f"Bearer {self._obter_token()}"}, timeout=timeout)
+
+    def _diagnostico_404(self, aba: str) -> str:
+        """Diz se o problema é o arquivo (GRAPH_ITEM_ID) ou a aba, para o erro não ficar genérico."""
+        arquivo = self._get("?$select=name", timeout=30)
+        if arquivo.status_code != 200:
+            return "Arquivo não encontrado no SharePoint: confira GRAPH_DRIVE_ID e GRAPH_ITEM_ID."
+        abas = self._get("/workbook/worksheets?$select=name", timeout=60)
+        nomes = [w["name"] for w in abas.json().get("value", [])] if abas.status_code == 200 else []
+        return (f"A aba '{aba}' não existe no arquivo configurado ({arquivo.json().get('name')}). "
+                + (f"Abas do arquivo: {', '.join(nomes)}. " if nomes else "")
+                + "Confira GRAPH_ITEM_ID.")
+
     def ler_aba(self, aba: str) -> list[list]:
         """Valores do usedRange da aba (primeira linha = cabeçalho)."""
-        url = (URL_ITEM.format(drive=config.GRAPH_DRIVE_ID, item=config.GRAPH_ITEM_ID)
-               + f"/workbook/worksheets('{quote(aba)}')/usedRange(valuesOnly=true)?$select=values")
-        resposta = self._sessao.get(url, headers={"Authorization": f"Bearer {self._obter_token()}"},
-                                    timeout=120)
+        resposta = self._get(f"/workbook/worksheets('{quote(aba)}')/usedRange(valuesOnly=true)?$select=values")
         if resposta.status_code == 200:
             return resposta.json().get("values", [])
         if resposta.status_code in (401, 403):
@@ -65,5 +77,5 @@ class ClienteGraph:
                                "(Files.Read.All ou Sites.Read.All com consentimento de administrador)."
                                if sem_permissao else "Verifique o acesso do aplicativo ao site."))
         if resposta.status_code == 404:
-            raise ErroGraph(f"Aba '{aba}' ou arquivo não encontrado no SharePoint.")
+            raise ErroGraph(self._diagnostico_404(aba)[:400])
         raise ErroGraph(f"Graph respondeu {resposta.status_code}: {resposta.text[:300]}")

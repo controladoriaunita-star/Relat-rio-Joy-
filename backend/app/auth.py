@@ -1,22 +1,25 @@
 """Autenticação (Supabase Auth) e permissões.
 
 O login acontece no navegador com o supabase-js; o backend recebe o access token
-(JWT) no cabeçalho Authorization e o valida. O perfil de cada usuário fica na
-tabela `perfis`: "adm" (desenvolvedores), "diretor" (Diretoria) ou o código de um
-setor ("mkt", "proj", "inc"...). Um setor novo cria um perfil novo.
+(JWT) no cabeçalho Authorization e o valida. As permissões seguem o padrão Unità:
+profiles, roles, permissions, role_permissions e user_roles. Os papéis são "admin"
+(desenvolvedores), "diretor" (Diretoria) e um por setor, com a chave do código do
+setor ("mkt", "proj", "inc"...). Um setor novo cria o papel correspondente.
 """
 from __future__ import annotations
 
 import os
+import uuid
 from typing import Protocol
 
 import jwt
 import requests
 
 from . import config
-from .db import Banco, agora
+from .catalogo import PAPEIS_GERAIS, PERMISSOES
+from .db import Banco
 
-PERFIS_GESTORES = {"adm", "diretor"}
+PAPEIS_RESERVADOS = set(PAPEIS_GERAIS)        # não podem virar código de setor
 PREFIXO_TOKEN_LOCAL = "local:"
 
 
@@ -70,10 +73,10 @@ def criar_verificador(banco: Banco) -> Verificador:
     return VerificadorSupabase()
 
 
-def usuario_sem_login() -> dict:
+def usuario_sem_login(banco: Banco) -> dict:
     """Usuário único usado enquanto o login está inativo (config.LOGIN_ATIVO = False)."""
-    return {"id": "sem-login", "usuario_id": "sem-login", "email": "", "login": "sem-login",
-            "nome": "Acesso livre", "perfil": config.PERFIL_SEM_LOGIN}
+    return _montar_usuario(banco, {"id": "sem-login", "email": "", "full_name": "Acesso livre"},
+                           [config.PERFIL_SEM_LOGIN])
 
 
 def usuario_do_token(banco: Banco, verificador: Verificador, token: str | None) -> dict | None:
@@ -83,11 +86,34 @@ def usuario_do_token(banco: Banco, verificador: Verificador, token: str | None) 
         claims = verificador.verificar(token)
     except ErroAutenticacao:
         return None
-    perfil = banco.um("SELECT usuario_id, email, nome, perfil FROM perfis WHERE usuario_id = ? AND ativo = 1",
+    perfil = banco.um("SELECT CAST(id AS TEXT) AS id, email, full_name FROM profiles WHERE id = ? AND active",
                       str(claims["sub"]))
-    if not perfil:
-        return None
-    return {**perfil, "id": perfil["usuario_id"], "login": perfil["email"]}
+    papeis = papeis_do_usuario(banco, perfil["id"]) if perfil else []
+    return _montar_usuario(banco, perfil, papeis) if papeis else None
+
+
+def _montar_usuario(banco: Banco, perfil: dict, papeis: list[str]) -> dict:
+    papeis = sorted(papeis, key=lambda k: (k not in PAPEIS_GERAIS, list(PAPEIS_GERAIS).index(k)
+                                           if k in PAPEIS_GERAIS else 0, k))
+    concedidas = permissoes_dos_papeis(banco, papeis)
+    return {"id": perfil["id"], "usuario_id": perfil["id"], "email": perfil["email"] or "",
+            "login": perfil["email"] or perfil["id"], "nome": perfil["full_name"],
+            "papeis": papeis, "perfil": papeis[0],
+            "permissoes": {p: p in concedidas for p in PERMISSOES}}
+
+
+def papeis_do_usuario(banco: Banco, usuario_id: str) -> list[str]:
+    return [l["key"] for l in banco.todos("SELECT r.key FROM user_roles ur JOIN roles r ON r.id = ur.role_id "
+                                          "WHERE ur.user_id = ?", usuario_id)]
+
+
+def permissoes_dos_papeis(banco: Banco, papeis: list[str]) -> set[str]:
+    if not papeis:
+        return set()
+    marcas = ", ".join("?" * len(papeis))
+    return {l["key"] for l in banco.todos(
+        "SELECT DISTINCT p.key FROM roles r JOIN role_permissions rp ON rp.role_id = r.id "
+        f"JOIN permissions p ON p.id = rp.permission_id WHERE r.key IN ({marcas})", *papeis)}
 
 
 # --------------------------------------------------------------------- Admin API do Supabase
@@ -109,10 +135,10 @@ class AdminSupabase:
         base = f"{config.SUPABASE_URL}/auth/v1"
         if senha:
             resposta = requests.post(f"{base}/admin/users", headers=self._cabecalhos(), timeout=30, json={
-                "email": email, "password": senha, "email_confirm": True, "user_metadata": {"nome": nome}})
+                "email": email, "password": senha, "email_confirm": True, "user_metadata": {"full_name": nome}})
         else:                                           # sem senha: envia convite por e-mail
             resposta = requests.post(f"{base}/invite", headers=self._cabecalhos(), timeout=30,
-                                     json={"email": email, "data": {"nome": nome}})
+                                     json={"email": email, "data": {"full_name": nome}})
         if resposta.status_code >= 300:
             raise ErroAutenticacao(f"Supabase recusou o usuário: {resposta.json().get('msg', resposta.text)[:200]}")
         return resposta.json()["id"]
@@ -132,7 +158,7 @@ class AdminSupabase:
 
 
 class AdminLocal:
-    """Desenvolvimento/testes: usuários só na tabela perfis."""
+    """Desenvolvimento/testes: usuários só na tabela profiles."""
 
     def criar(self, email: str, nome: str, senha: str | None) -> str:
         return f"local-{email.lower()}"
@@ -141,33 +167,32 @@ class AdminLocal:
         return None
 
 
-def registrar_perfil(banco: Banco, usuario_id: str, email: str, nome: str, perfil: str,
-                     autor: str | None = None) -> None:
+def uuid_ou_none(valor: str | None) -> str | None:
+    """granted_by referencia auth.users: só um uuid real entra (o usuário "sem-login" não)."""
+    try:
+        return str(uuid.UUID(str(valor)))
+    except ValueError:
+        return None
+
+
+def registrar_usuario(banco: Banco, usuario_id: str, email: str, nome: str, papel: str,
+                      autor: dict | None = None) -> None:
+    """Grava o profile e deixa o usuário com um único papel (o perfil escolhido na tela)."""
     with banco.transacao() as con:
-        con.execute("INSERT INTO perfis (usuario_id, email, nome, perfil, criado_em) VALUES (?, ?, ?, ?, ?) "
-                    "ON CONFLICT (usuario_id) DO UPDATE SET email = excluded.email, nome = excluded.nome, "
-                    "perfil = excluded.perfil, ativo = 1",
-                    (usuario_id, email.strip().lower(), nome.strip(), perfil, agora()))
-        banco.registrar(con, autor, "usuario.salvar", {"email": email, "perfil": perfil})
+        con.execute("INSERT INTO profiles (id, full_name, email, active) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT (id) DO UPDATE SET full_name = excluded.full_name, email = excluded.email, "
+                    "active = excluded.active", (usuario_id, nome.strip(), email.strip().lower(), True))
+        con.execute("DELETE FROM user_roles WHERE user_id = ?", (usuario_id,))
+        con.execute("INSERT INTO user_roles (id, user_id, role_id, granted_by) "
+                    "SELECT ?, ?, id, ? FROM roles WHERE key = ?",
+                    (str(uuid.uuid4()), usuario_id, uuid_ou_none(autor and autor["id"]), papel))
+        banco.registrar(con, autor and autor["login"], "usuario.salvar", {"email": email, "papel": papel})
 
 
 # --------------------------------------------------------------------- permissões
-def eh_gestor(usuario: dict) -> bool:
-    return usuario["perfil"] in PERFIS_GESTORES
+def permissoes(usuario: dict) -> dict[str, bool]:
+    return usuario["permissoes"]
 
 
 def pode_editar_setor(usuario: dict, codigo_setor: str) -> bool:
-    return eh_gestor(usuario) or usuario["perfil"] == codigo_setor
-
-
-def permissoes(usuario: dict) -> dict:
-    gestor = eh_gestor(usuario)
-    return {
-        "ver_apis": gestor,
-        "editar_premissas": gestor,
-        "atualizar_fontes": gestor,
-        "classificar": gestor,
-        "editar_saldos": gestor,
-        "editar_meses_passados": gestor,
-        "administrar": usuario["perfil"] == "adm",
-    }
+    return permissoes(usuario)["projecao.editar_todos_setores"] or codigo_setor in usuario["papeis"]
