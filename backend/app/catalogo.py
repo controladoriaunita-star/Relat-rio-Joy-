@@ -180,7 +180,6 @@ PERMISSOES = {
     "apis.ver": "Ver a aba API's (fontes, pendências, saldos, viabilidade e histórico)",
     "fontes.atualizar": "Atualizar as fontes (SharePoint ou Excel)",
     "fontes.classificar": "Classificar lançamentos pendentes (DePara)",
-    "saldos.editar": "Lançar e excluir saldos bancários",
     "premissas.editar": "Editar premissas do aporte e viabilidade",
     "setores.gerenciar": "Criar e alterar setores e linhas de projeção",
     "usuarios.gerenciar": "Gerenciar usuários, papéis e permissões dentro do app",

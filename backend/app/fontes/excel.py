@@ -13,7 +13,7 @@ from pathlib import Path
 import openpyxl
 
 from ..excel_funcoes import como_data, como_numero
-from ..motor.base import LinhaProjecao, SaldoConta
+from ..motor.base import LinhaProjecao
 from .definicoes import FONTES
 
 
@@ -22,7 +22,6 @@ class PlanilhaExcel:
     tabelas: dict[str, list[list]] = field(default_factory=dict)     # código da fonte → valores
     depara: dict[str, list[tuple]] = field(default_factory=dict)     # código → [(concat, classif)]
     projecao: list[LinhaProjecao] = field(default_factory=list)
-    saldos: list[SaldoConta] = field(default_factory=list)
     ultima_atualizacao: datetime | None = None
     livro: object = None                                              # workbook (valores salvos)
 
@@ -54,12 +53,6 @@ def ler_planilha(caminho: Path) -> PlanilhaExcel:
     i = {nome: cab.index(nome) for nome in ("Descrição", "Datas", "Tipo", "Valor")}
     planilha.projecao = [LinhaProjecao(l[i["Descrição"]], como_data(l[i["Datas"]]),
                                        l[i["Tipo"]], como_numero(l[i["Valor"]])) for l in linhas]
-
-    cab, *linhas = _tabela_por_nome(livro, "Consulta2")
-    i = {nome: cab.index(nome) for nome in ("Empresa", "Conta", "Data", "Saldo")}
-    planilha.saldos = [SaldoConta(l[i["Empresa"]], l[i["Conta"]], como_data(l[i["Data"]]),
-                                  como_numero(l[i["Saldo"]]))
-                       for l in linhas if l[i["Data"]] is not None]
 
     _, *linhas = _tabela_por_nome(livro, "Ultima_Atualização")
     planilha.ultima_atualizacao = linhas[0][0] if linhas else None

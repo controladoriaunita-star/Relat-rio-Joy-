@@ -1,4 +1,4 @@
-"""As seis tabelas de origem (APIs do Graph) e como cada uma chega ao motor."""
+"""As sete tabelas de origem (APIs do Graph) e como cada uma chega ao motor."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -33,5 +33,7 @@ FONTES = [
           ("Empresa_tb", "EmpresaCred_tb", "Data_tb", "Valor_tb")),
     Fonte("recebidas", "Recebidas", "Recebidas", "Recebidos", "Recebidas",
           ("CódigoCliente", "Data_Recebimento", "Valor_Líquido")),
+    Fonte("saldos", "Saldos bancários", "Saldo", "Saldo", "Consulta2",
+          ("Empresa", "Data", "Conta", "Saldo")),
 ]
 FONTES_POR_CODIGO = {f.codigo: f for f in FONTES}

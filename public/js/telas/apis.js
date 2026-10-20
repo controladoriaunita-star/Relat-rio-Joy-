@@ -98,40 +98,16 @@ async function fontes(el, ctx) {
   el.querySelectorAll('[data-pendentes]').forEach((b) => (b.onclick = () => abrirPendentes(b.dataset.pendentes, dados.rubricas, ctx.recarregar)));
 }
 
-async function saldos(el, ctx) {
+async function saldos(el) {
   const lista = await api('/api/saldos');
-  const pode = ctx.usuario.permissoes['saldos.editar'];
   el.innerHTML = `
-    <div class="alert a-info" style="margin-bottom:16px"><b>Saldo bancário por lançamento manual</b>
-      <div>O Resumo usa, para cada conta, o saldo do último dia lançado no mês (regra da aba Saldo da planilha).</div></div>
-    ${pode ? `<div class="card pad" style="margin-bottom:16px"><form class="formulario" id="form-saldo">
-      <div class="field"><label>Conta</label><input name="conta" required placeholder="98672-8" /></div>
-      <div class="field"><label>Descrição</label><input name="descricao" placeholder="ITAU - SPE Evans" /></div>
-      <div class="field"><label>Data</label><input name="data" type="date" required /></div>
-      <div class="field"><label>Saldo</label><input name="saldo" inputmode="decimal" required placeholder="0,00" /></div>
-      <button class="btn primary" type="submit">Lançar saldo</button></form></div>` : ''}
-    <div class="sheet" style="max-height:60vh"><table><thead><tr><th class="first">Conta</th><th>Data</th><th>Saldo</th><th style="text-align:left">Descrição</th><th></th></tr></thead>
+    <div class="alert a-info" style="margin-bottom:16px"><b>Saldos lidos da aba "Saldo" do SharePoint</b>
+      <div>Atualizados junto com as demais fontes. Para cada conta, o Resumo usa o último lançamento do mês
+      (marcado como fim de mês); a soma das contas é o saldo do mês anterior no cálculo do aporte.</div></div>
+    <div class="sheet" style="max-height:60vh"><table><thead><tr><th class="first">Conta</th><th>Data</th><th>Saldo</th><th></th></tr></thead>
     <tbody>${lista.map((s) => `<tr><td class="first">${esc(s.conta)}</td><td>${fmt.data(s.data)}</td><td>${fmt.numero(s.saldo)}</td>
-      <td style="text-align:left">${esc(s.descricao || '')}</td>
-      <td>${pode ? `<button class="btn ghost sm" data-excluir="${s.id}">Excluir</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
-  el.querySelector('#form-saldo')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const f = e.currentTarget;
-    const saldo = lerNumero(f.saldo.value);
-    if (Number.isNaN(saldo)) return toast('Saldo inválido', { tipo: 'error' });
-    try {
-      await api('/api/saldos', { metodo: 'POST', corpo: { conta: f.conta.value, descricao: f.descricao.value, data: f.data.value, saldo } });
-      toast('Saldo lançado');
-      ctx.recarregar();
-    } catch (erro) { erroToast(erro); }
-  });
-  el.querySelectorAll('[data-excluir]').forEach((b) => (b.onclick = () => modal({
-    titulo: 'Excluir saldo?', conteudo: '<p>O lançamento será removido do cálculo.</p>',
-    acoes: [{ rotulo: 'Excluir', classe: 'danger', ao: async () => {
-      await api(`/api/saldos/${b.dataset.excluir}`, { metodo: 'DELETE' });
-      toast('Saldo excluído');
-      ctx.recarregar();
-    } }] })));
+      <td>${s.fim_de_mes ? '<span class="badge b-primary">fim de mês</span>' : ''}</td></tr>`).join('')
+      || '<tr><td class="first muted" colspan="4">Nenhum saldo carregado. Atualize as fontes.</td></tr>'}</tbody></table></div>`;
 }
 
 async function parametros(el, ctx) {

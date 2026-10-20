@@ -219,16 +219,6 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
     def saldos(_: dict = Depends(exigir("apis.ver"))):
         return servico.listar_saldos()
 
-    @app.post("/api/saldos")
-    def salvar_saldo(dados: dict, usuario: dict = Depends(exigir("saldos.editar"))):
-        servico.salvar_saldo(dados, usuario)
-        return {"ok": True}
-
-    @app.delete("/api/saldos/{saldo_id}")
-    def excluir_saldo(saldo_id: int, usuario: dict = Depends(exigir("saldos.editar"))):
-        servico.excluir_saldo(saldo_id, usuario)
-        return {"ok": True}
-
     # ------------------------------------------------------------------ administração
     @app.get("/api/setores")
     def setores(_: dict = Depends(usuario_atual)):

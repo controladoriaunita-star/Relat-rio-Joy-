@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..excel_funcoes import como_data, como_numero, eomonth, texto_concat
-from ..motor.base import Desembolso, Movimento, Recebimento, Transferencia
+from ..motor.base import Desembolso, Movimento, Recebimento, SaldoConta, Transferencia
 from .definicoes import FONTES_POR_CODIGO, Fonte
 
 
@@ -58,7 +58,7 @@ def _inteiro(valor) -> int | None:
         return None
 
 
-COLUNAS_DE_VALOR = {"TotalLiquido", "Valor_es", "Valor_tb", "Valor_Líquido"}
+COLUNAS_DE_VALOR = {"TotalLiquido", "Valor_es", "Valor_tb", "Valor_Líquido", "Saldo"}
 
 
 def _vazio(valor) -> bool:
@@ -107,6 +107,9 @@ def normalizar(codigo: str, linhas: list[dict], depara: dict[str, str]) -> Resul
         elif codigo == "transferencias":
             registro = Transferencia(_inteiro(linha["Empresa_tb"]), _inteiro(linha["EmpresaCred_tb"]),
                                      eomonth(como_data(linha["Data_tb"])), como_numero(linha["Valor_tb"]))
+        elif codigo == "saldos":
+            registro = SaldoConta(_inteiro(linha["Empresa"]), _texto(linha["Conta"]),
+                                  como_data(linha["Data"]), como_numero(linha["Saldo"]))
         else:
             registro = Recebimento(_inteiro(linha["CódigoCliente"]),
                                    eomonth(como_data(linha["Data_Recebimento"])),

@@ -21,10 +21,10 @@ from .fontes.definicoes import FONTES, FONTES_POR_CODIGO
 from .fontes.graph import ClienteGraph, ErroGraph
 from .fontes.montagem import montar_base
 from .fontes.normalizacao import montar_depara, normalizar, tabela_para_dicts
-from .motor.base import Base, LinhaProjecao, SaldoConta
+from .motor.base import Base, LinhaProjecao
 from .motor import dashboards as painel_dashboards
 from .motor.painel import calcular_painel
-from .motor.resumo import calcular_resumo
+from .motor.resumo import calcular_resumo, saldo_fim_de_mes
 
 TIPO_PROJETADO = "Projetado"
 TIPO_PROJETADO_TOTAL = "Projetado Total"
@@ -192,10 +192,6 @@ class Servico:
         linhas += [LinhaProjecao(r, m, TIPO_PROJETADO_TOTAL, v) for (r, m), v in totais.items()]
         return linhas
 
-    def saldos(self) -> list[SaldoConta]:
-        return [SaldoConta(s["empresa"], s["conta"], date.fromisoformat(s["data"]), s["saldo"])
-                for s in self.banco.todos("SELECT * FROM saldos")]
-
     def base(self) -> tuple[Base, dict]:
         chave = ("base", self.banco.versao)
         if chave not in self._cache:
@@ -205,8 +201,7 @@ class Servico:
                 tabelas[fonte.codigo] = json.loads(carga["dados"]) if carga else []
                 if carga and (ultima is None or carga["iniciado_em"] > ultima):
                     ultima = carga["iniciado_em"]
-            self._cache = {chave: montar_base(tabelas, self.depara(), self.projecao_para_motor(),
-                                              self.saldos(), ultima)}
+            self._cache = {chave: montar_base(tabelas, self.depara(), self.projecao_para_motor(), ultima)}
         return self._cache[chave]
 
     def calcular(self, aba: str, hoje: date) -> dict:
@@ -274,7 +269,7 @@ class Servico:
                 "ultima_ok": ok[0] if ok else None,
                 "variacao_linhas": (ok[0]["linhas"] - ok[1]["linhas"]) if len(ok) > 1 else None,
                 "registros": len(resultado.registros),
-                "valor_total": round(sum(r.valor for r in resultado.registros), 2),
+                "valor_total": round(self._valor_da_carga(fonte.codigo, resultado.registros), 2),
                 "pendentes": len(resultado.pendentes),
                 "ignoradas": resultado.ignoradas,
                 "classificavel": bool(fonte.chave),
@@ -284,6 +279,16 @@ class Servico:
                 "excel_disponivel": ARQUIVO_EXCEL.exists(),
                 "rubricas": RUBRICAS + ["Rendimentos ", "Aporte", "Aporte Holding",
                                         "Retorno de Aporte", "Retorno de Aporte Holding"]}
+
+    @staticmethod
+    def _valor_da_carga(codigo: str, registros: list) -> float:
+        """Conferência da carga: soma dos valores; para saldos, o saldo do último mês lançado
+        (último saldo de cada conta naquele mês), que é o que o Resumo usa."""
+        if codigo != "saldos":
+            return sum(r.valor for r in registros)
+        if not registros:
+            return 0.0
+        return saldo_fim_de_mes(Base(saldos=registros), max(eomonth(r.data) for r in registros))
 
     def pendentes(self, codigo: str) -> list[dict]:
         _, resultados = self.base()
@@ -308,25 +313,18 @@ class Servico:
 
     # ================================================================ saldos bancários
     def listar_saldos(self) -> list[dict]:
-        return self.banco.todos("SELECT * FROM saldos ORDER BY data DESC, conta")
-
-    def salvar_saldo(self, dados: dict, usuario: dict) -> None:
-        data = como_data(dados.get("data"))
-        conta = str(dados.get("conta") or "").strip()
-        if not data or not conta:
-            raise ErroNegocio("Informe conta e data.")
-        with self.banco.transacao() as con:
-            con.execute("INSERT INTO saldos (empresa, conta, descricao, data, saldo) VALUES (?, ?, ?, ?, ?) "
-                        "ON CONFLICT(empresa, conta, data) DO UPDATE SET saldo = excluded.saldo, "
-                        "descricao = excluded.descricao",
-                        (int(dados.get("empresa") or EMPRESA_SPE), conta, dados.get("descricao"),
-                         data.isoformat(), float(dados.get("saldo") or 0)))
-            self.banco.registrar(con, usuario["login"], "saldo.salvar", dados)
-
-    def excluir_saldo(self, saldo_id: int, usuario: dict) -> None:
-        with self.banco.transacao() as con:
-            con.execute("DELETE FROM saldos WHERE id = ?", (saldo_id,))
-            self.banco.registrar(con, usuario["login"], "saldo.excluir", {"id": saldo_id})
+        """Saldos da aba Saldo do SharePoint. Marca o lançamento usado como saldo de fim de
+        mês de cada conta (o último do mês, como Consulta2[Coluna1] = 1)."""
+        _, resultados = self.base()
+        saldos = resultados["saldos"].registros
+        ultimo = {}
+        for x in saldos:
+            k = (x.empresa, (x.conta or "").casefold(), eomonth(x.data))
+            if k not in ultimo or x.data > ultimo[k]:
+                ultimo[k] = x.data
+        return [{"empresa": x.empresa, "conta": x.conta, "data": x.data, "saldo": x.saldo,
+                 "fim_de_mes": x.data == ultimo[(x.empresa, (x.conta or "").casefold(), eomonth(x.data))]}
+                for x in sorted(saldos, key=lambda x: (x.data, x.conta or ""), reverse=True)]
 
     # ================================================================ setores e linhas
     def setores(self, incluir_inativos: bool = False) -> list[dict]:
@@ -409,6 +407,7 @@ class Servico:
         ordem = list(PERMISSOES)
         permissoes = self.banco.todos("SELECT key, description FROM permissions")
         permissoes.sort(key=lambda p: ordem.index(p["key"]) if p["key"] in ordem else len(ordem))
+        permissoes = [p for p in permissoes if p["key"] in PERMISSOES]   # só as que o app usa
         return {"permissoes": permissoes, "papel_admin": PAPEL_ADMIN,
                 "papeis": [{**papeis[k], "permissoes": sorted(concessoes[k])} for k in self.perfis()]}
 
@@ -582,7 +581,7 @@ class Servico:
 
     # ================================================================ migração do Excel
     def migrar_do_excel(self, caminho=ARQUIVO_EXCEL, importar_projecao: bool = True) -> dict:
-        """Carga inicial a partir da planilha: DePara, saldos, fontes e projeção (sem duplicidades)."""
+        """Carga inicial a partir da planilha: DePara, fontes (inclusive saldos) e projeção (sem duplicidades)."""
         from .fontes.excel import ler_planilha
         planilha = ler_planilha(caminho)
         with self.banco.transacao() as con:
@@ -593,13 +592,8 @@ class Servico:
                                     "atualizado_por, atualizado_em) VALUES (?, ?, ?, ?, 'migracao', ?) "
                                     "ON CONFLICT (fonte, chave) DO NOTHING",
                                     (codigo, str(concat).casefold(), str(concat), classificacao, agora()))
-            for s in planilha.saldos:
-                con.execute("INSERT INTO saldos (empresa, conta, data, saldo) VALUES (?, ?, ?, ?) "
-                            "ON CONFLICT (empresa, conta, data) DO NOTHING",
-                            (s.empresa, s.conta, s.data.isoformat(), s.saldo))
         self.atualizar_fontes("excel", None, tabelas_excel=planilha.tabelas)
-        relatorio = {"depara": sum(len(v) for v in planilha.depara.values()),
-                     "saldos": len(planilha.saldos)}
+        relatorio = {"depara": sum(len(v) for v in planilha.depara.values())}
         if importar_projecao:
             relatorio["projecao"] = self._importar_projecao(planilha.projecao)
         return relatorio

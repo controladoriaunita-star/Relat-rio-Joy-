@@ -36,7 +36,7 @@ COLUNAS_PAINEL_COBERTAS = set(COLUNAS_PAINEL) | {"J", "N", "BA", "BB", "FS", "FT
 def cenario():
     planilha = ler_planilha(ARQUIVO_EXCEL)
     base, resultados = montar_base(planilha.tabelas, planilha.depara, planilha.projecao,
-                                   planilha.saldos, planilha.ultima_atualizacao)
+                                   planilha.ultima_atualizacao)
     hoje = planilha.ultima_atualizacao.date()
     # Z22 é digitado na planilha; no sistema é automático. Para comparar, usa o valor do Excel.
     premissas = Premissas(custo_projetado_proximo=775384.9700000001)

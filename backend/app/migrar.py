@@ -1,8 +1,8 @@
 """Comandos de implantação.
 
   python -m backend.app.migrar planilha [--sem-projecao]
-      Carga inicial a partir do Controle - Joy+ Evans.xlsm: DePara, saldos, as seis
-      fontes e a projeção (sem os blocos duplicados da Projeção_2).
+      Carga inicial a partir do Controle - Joy+ Evans.xlsm: DePara, as sete fontes
+      (inclusive os saldos bancários) e a projeção (sem os blocos duplicados da Projeção_2).
   python -m backend.app.migrar admin <email> "<nome>" [senha]
       Cria o primeiro administrador (sem senha, o Supabase envia convite por e-mail).
 

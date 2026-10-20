@@ -225,7 +225,7 @@ def test_aba_apis_restrita(ambiente):
     assert cliente(ambiente, "ana.mkt").get("/api/fontes").status_code == 403
     status = cliente(ambiente, "edu.adm").get("/api/fontes").json()
     assert {f["codigo"] for f in status["fontes"]} == {"custos_spe", "custos_nn", "saidas", "entradas",
-                                                       "transferencias", "recebidas"}
+                                                       "transferencias", "recebidas", "saldos"}
     assert all(f["ultima_ok"] and f["pendentes"] == 0 for f in status["fontes"])
 
 
@@ -267,14 +267,28 @@ def test_pendencia_de_classificacao(ambiente):
 
 
 # ------------------------------------------------------------------------ saldos e premissas
-def test_saldo_manual_altera_resumo(ambiente):
+def test_saldos_vem_da_fonte_e_alimentam_o_resumo(ambiente):
+    """Saldo do mês anterior (Z5) = soma, por conta, do último saldo do mês na aba Saldo."""
     adm = cliente(ambiente, "edu.adm")
-    antes = adm.get(f"/api/resumo?data={HOJE}").json()["aporte_mes"]["saldo_anterior"]
-    assert adm.post("/api/saldos", json={"conta": "99999-9", "data": "2026-09-30",
-                                         "saldo": 1000}).status_code == 200
+    resumo = adm.get(f"/api/resumo?data={HOJE}").json()
+    saldos = adm.get("/api/saldos").json()
+    fim = [x for x in saldos if x["fim_de_mes"] and x["data"][:7] == resumo["datas"]["mes_analise"][:7]]
+    assert fim and math.isclose(sum(x["saldo"] for x in fim), resumo["aporte_mes"]["saldo_anterior"])
+    assert len({x["conta"] for x in fim}) == len(fim)                 # um saldo por conta
+    servico = ambiente["servico"]
+    carga = servico.banco.um("SELECT id, dados FROM cargas WHERE fonte = 'saldos' AND status = 'ok' ORDER BY id DESC LIMIT 1")
+    valores = json.loads(carga["dados"])
+    cab = valores[0]
+    nova = [None] * len(cab)
+    for coluna, valor in (("Empresa", 73), ("Data", resumo["datas"]["mes_analise"]), ("Conta", "99999-9"), ("Saldo", 1000)):
+        nova[cab.index(coluna)] = valor
+    with servico.banco.transacao() as con:
+        con.execute("UPDATE cargas SET dados = ? WHERE id = ?", (json.dumps(valores + [nova]), carga["id"]))
     depois = adm.get(f"/api/resumo?data={HOJE}").json()["aporte_mes"]["saldo_anterior"]
-    assert math.isclose(depois - antes, 1000)
-    assert cliente(ambiente, "ana.mkt").post("/api/saldos", json={}).status_code == 403
+    assert math.isclose(depois - resumo["aporte_mes"]["saldo_anterior"], 1000)
+    with servico.banco.transacao() as con:
+        con.execute("UPDATE cargas SET dados = ? WHERE id = ?", (carga["dados"], carga["id"]))
+    assert cliente(ambiente, "ana.mkt").get("/api/saldos").status_code == 403
 
 
 def test_premissas(ambiente):
@@ -289,7 +303,7 @@ def test_premissas(ambiente):
 
 def test_historico_registra_acoes(ambiente):
     acoes = {h["acao"] for h in cliente(ambiente, "edu.adm").get("/api/historico").json()}
-    assert {"projecao.salvar", "depara.classificar", "fonte.atualizar", "saldo.salvar"} <= acoes
+    assert {"projecao.salvar", "depara.classificar", "fonte.atualizar"} <= acoes
 
 
 def test_custo_proximo_mes_automatico(ambiente):

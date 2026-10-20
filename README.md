@@ -58,7 +58,7 @@ do `.env`, então "Atualizar do SharePoint" funciona como em produção.
 | Dashboards | Exposição de caixa (pontos A–D: investimento inicial, máxima exposição, primeiro fluxo positivo, equilíbrio), gasto × projetado, recebimentos, custos por rubrica, setores que mais gastaram e acerto da projeção | admin, diretor |
 | Painel | Realizado × Projetado × EVE (colunas A–F), verificação da planilha e linha do tempo jan/2024–dez/2030 | admin, diretor |
 | Projeção | Grade mensal por setor/linha; o total por rubrica alimenta o "Projetado" do Resumo e do Painel | todos; cada setor edita as suas linhas |
-| API's | Validador das 6 fontes, pendências de classificação, saldos bancários, viabilidade, usuários, permissões e histórico | admin, diretor |
+| API's | Validador das 7 fontes, pendências de classificação, saldos bancários, viabilidade, usuários, permissões e histórico | admin, diretor |
 
 **Permissões (padrão Unità v1):** tabelas `profiles`, `roles`, `permissions`,
 `role_permissions` e `user_roles` (migração `20261020150000_papeis_e_permissoes.sql`).
@@ -101,12 +101,15 @@ A **data-base** no topo substitui o `HOJE()` da planilha.
 | Controle Entradas | `Controle Entradas` | DePara por `Empresa_es - Num_es` |
 | Transferências | `Transferências Bancarias` | — |
 | Recebidas | `Recebidas` | — |
+| Saldos bancários | `Saldo` (tabela Consulta2) | — |
 
 - Cada atualização grava uma carga por fonte. Se uma fonte falhar, o cálculo continua com a
   última carga válida e a aba API's mostra o erro.
 - Lançamentos sem classificação ficam fora do cálculo e aparecem como pendência; a classificação
   feita na tela é gravada no DePara.
-- O **saldo bancário** é lançado manualmente em API's › Saldos bancários (vale o último dia do mês, por conta).
+- O **saldo bancário** vem da aba `Saldo` do SharePoint: para cada conta vale o último lançamento do
+  mês, e a soma das contas é o saldo do mês anterior no cálculo do aporte. API's › Saldos bancários
+  mostra os lançamentos lidos e marca os de fim de mês.
 
 ---
 
@@ -153,7 +156,7 @@ set APORTE_TESTE_GRAPH=1 && python -m pytest backend/tests/test_graph_real.py
   refletindo no Resumo/Painel, custo do próximo mês automático, novo setor, usuário desativado,
   falha do Graph, pendência de classificação, saldos, premissas e histórico.
 - **JWT (`test_auth.py`)**: assinatura, audiência, emissor e expiração do token do Supabase.
-- **Graph real (`test_graph_real.py`)**: autenticação, permissões do token e colunas das 6 rotas.
+- **Graph real (`test_graph_real.py`)**: autenticação, permissões do token e colunas das 7 rotas.
 
 Os testes usam SQLite; o mesmo SQL roda no Postgres do Supabase.
 
