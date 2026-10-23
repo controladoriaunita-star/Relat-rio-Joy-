@@ -30,6 +30,14 @@ function somaGrupo(linhas) {
   return Object.fromEntries(['viabilidade', ...CAMPOS].map((c) => [c, soma(c)]));
 }
 
+// Títulos da planilha terminam na data de referência ("Pago Total até 30/09/2026"): ela vai
+// para a segunda linha, para o cabeçalho caber em colunas estreitas.
+function titulo(texto) {
+  const t = texto.replace(/\s+/g, ' ').trim();
+  const m = t.match(/^(.*?)\s+((?:até\s+)?\S*\d{4})$/i);
+  return m ? `${esc(m[1])} <small>${esc(m[2])}</small>` : esc(t);
+}
+
 function tabela(d) {
   const t = d.titulos;
   let corpo = linhaTabela({ ...d.total, rubrica: 'Total' }, 'grande');
@@ -42,11 +50,12 @@ function tabela(d) {
       corpo += linhaTabela({ ...total, rubrica: g.titulo }, 'total');
     }
   }
-  return `<div class="sheet tabela-resumo"><table><thead><tr>
+  return `<div class="sheet tabela-resumo"><table>
+    <colgroup><col class="c-rubrica" /><col class="c-viab" /><col class="c-pct" />${'<col />'.repeat(6)}</colgroup><thead><tr>
       <th class="first">Rubricas</th><th>Valor Viabilidade</th><th>% Consumido</th>
-      <th>${esc(t.pago_ate)}</th><th>${esc(t.pago_mes)}</th><th>${esc(t.a_pagar.replace('  ', ' '))}</th>
-      <th>Projetado Mês</th><th>${esc(t.projetado_proximo.replace('  ', ' '))}</th>
-      <th title="Pago no mês + contas a pagar">Total Mês (Pago + A Pagar)</th></tr></thead>
+      <th>${titulo(t.pago_ate)}</th><th>${titulo(t.pago_mes)}</th><th>${titulo(t.a_pagar)}</th>
+      <th>Projetado Mês</th><th>${titulo(t.projetado_proximo)}</th>
+      <th title="Pago no mês + contas a pagar">Total Mês <small>(Pago + A Pagar)</small></th></tr></thead>
     <tbody>${corpo}</tbody></table></div>`;
 }
 
