@@ -1,4 +1,5 @@
 // Aba Painel: realizado x projetado x EVE e linha do tempo mensal (jan/2024 a dez/2030).
+// Regras de cálculo e correções em relação à planilha: backend/app/motor/painel.py.
 import { api, carregando, ehNumero, esc, fmt, focarMesCorrente, montarGrafico } from '../util.js';
 
 // Ordem e estilo das linhas, seguindo a aba Painel da planilha.
@@ -11,24 +12,23 @@ const SECOES = [
   { titulo: 'Holding', linhas: [[111, 'total'], 112, 113, 114, 115, 116] },
   { titulo: 'Caixa', linhas: [[119, 'grande']] },
 ];
-const ROTULOS_TL = { 119: 'Saldo de caixa para consolidado', 122: 'Saldo de caixa acumulado final' };
+const ROTULOS_TL = { 95: 'Saldo de caixa acumulado (operação)', 119: 'Fluxo de caixa do mês (operação + sócios)',
+  122: 'Saldo de caixa acumulado (banco)' };
 let visao = 'consolidado';
 let anoSelecionado = null;
+let ocultarZeradas = false;     // esconde rubricas sem nenhum valor (realizado, projetado e EVE)
 
 function range(a, b) { return Array.from({ length: b - a + 1 }, (_, i) => a + i); }
 
 function valor(v, pct = false) {
-  if (v === '#VALUE!') return '<span class="badge b-error" title="Erro #VALOR! na planilha original">#VALOR!</span>';
   if (!ehNumero(v)) return '';
   return pct ? fmt.pct(v) : fmt.numero(v);
 }
 
-function verificacao(l) {
-  const { FT, FU } = l.extras || {};
-  if (!FT) return '<td></td>';
-  const badge = (ok, rotulo) => `<span class="badge ${ok ? 'b-success' : 'b-warning'}" title="${rotulo}: linha do tempo ${ok ? 'confere' : 'difere'} da coluna">${ok ? 'OK' : 'Dif.'}</span>`;
-  return `<td>${badge(FT === 'OK!', 'Realizado')} ${badge(FU === 'OK!', 'Projetado')}</td>`;
-}
+const zerada = (l) => ['H', 'P', 'X'].every((c) => !ehNumero(l[c]) || Math.abs(l[c]) < 0.005);
+
+/** Linhas que divergem na conferência linha do tempo × colunas (deve ser zero). */
+const divergentes = (dados) => dados.linhas.filter((l) => l.extras?.FT === 'ERRO' || l.extras?.FU === 'ERRO');
 
 function tabelaConsolidado(dados) {
   const linhas = Object.fromEntries(dados.linhas.map((l) => [l.linha_excel, l]));
@@ -39,26 +39,27 @@ function tabelaConsolidado(dados) {
     for (const item of secao.linhas) {
       const [r, estilo] = Array.isArray(item) ? item : [item, ''];
       const l = linhas[r];
-      if (!l) continue;
+      if (!l || (ocultarZeradas && !estilo && zerada(l))) continue;
       const pct = estilo === 'pct';
+      // Custo/despesa acima do EVE: F = −D ÷ E passa de 100%.
       const alerta = ['custo', 'despesa'].includes(l.grupo) && ehNumero(l.AB) && l.AB > 1;
       corpo += `<tr class="${estilo === 'pct' ? '' : estilo}" title="Linha ${r} do Painel">
         <td class="first">${esc(l.rotulo || (r === 99 ? 'M T I R (a.m.)' : ''))}</td>
         <td>${valor(l.H, pct)}</td><td>${valor(l.L, pct)}</td><td>${valor(l.P, pct)}</td>
         <td>${valor(l.T, pct)}</td><td>${valor(l.X, pct)}</td><td>${valor(l.Y, true)}</td>
-        <td class="${alerta ? 'alerta' : ''}">${valor(l.AB, true)}</td>${verificacao(l)}</tr>`;
+        <td class="${alerta ? 'alerta' : ''}" ${alerta ? 'title="Acima do previsto no EVE"' : ''}>${valor(l.AB, true)}</td></tr>`;
     }
   }
-  return `<div class="sheet"><table><thead><tr>
+  const inicioProjecao = t.projetado_mes.replace('Projetado ', '');
+  return `<div class="sheet" style="max-height:72vh"><table><thead><tr>
       <th class="first">Rubrica</th>
-      <th><span class="letra">A</span>${esc(t.realizado)}</th>
-      <th><span class="letra">B</span>Projetado (Mês)</th>
-      <th><span class="letra">C</span>Projetado Total</th>
+      <th title="Fontes do SharePoint até o mês de análise"><span class="letra">A</span>${esc(t.realizado)}</th>
+      <th title="Projeção dos setores para o mês corrente"><span class="letra">B</span>${esc(t.projetado_mes)}</th>
+      <th title="Projeção do mês corrente até dez/2030"><span class="letra">C</span>Projetado desde ${esc(inicioProjecao)}</th>
       <th><span class="letra">D = A + C</span>Total (Real. + Proj.)</th>
       <th><span class="letra">E</span>Previsto Total no EVE</th>
       <th><span class="letra">AV</span>% VGV</th>
-      <th><span class="letra">F = D / E</span>Desvio</th>
-      <th title="Conferência da planilha (colunas FT/FU)">Verificação</th>
+      <th title="Receitas: D ÷ E. Custos e despesas: % do EVE consumido (acima de 100% em vermelho)."><span class="letra">F = D / E</span>% do EVE</th>
     </tr></thead><tbody>${corpo}</tbody></table></div>`;
 }
 
@@ -74,6 +75,7 @@ function tabelaLinhaDoTempo(dados) {
       const [r, estilo] = Array.isArray(item) ? item : [item, ''];
       const l = linhas[r];
       if (!l || !l.tl.some((v) => v !== null)) continue;
+      if (ocultarZeradas && !estilo && l.tl.every((v) => !ehNumero(v) || Math.abs(v) < 0.005)) continue;
       corpo += `<tr class="${estilo === 'pct' ? '' : estilo}"><td class="first">${esc(ROTULOS_TL[r] || l.rotulo || (r === 95 ? 'Saldo acumulado' : ''))}</td>
         ${indices.map(([m, i], j) => `<td class="${m === corte ? 'cur' : ''} ${m > dados.datas.mes_analise ? 'proj' : ''} ${m.endsWith('-01-31') && j ? 'ano-inicio' : ''}">${valor(l.tl[i])}</td>`).join('')}
         <td class="tot">${valor(l.extras?.FS)}</td><td class="tot">${valor(l.extras?.FV)}</td></tr>`;
@@ -81,7 +83,7 @@ function tabelaLinhaDoTempo(dados) {
   }
   return `<div class="sheet" style="max-height:70vh"><table><thead><tr><th class="first">Rubrica</th>${cab}
     <th class="tot">Realizado</th><th class="tot">Projetado</th></tr></thead><tbody>${corpo}</tbody></table></div>
-    <div class="legend"><span><i style="background:var(--cell-current)"></i>Mês de corte (realizado × projetado)</span>
+    <div class="legend"><span><i style="background:var(--cell-current)"></i>Mês corrente (primeiro mês projetado)</span>
       <span><i style="background:#fff;border-color:var(--color-primary)"></i><span style="color:var(--color-primary)">Valores em roxo</span>: meses futuros (projeção)</span></div>`;
 }
 
@@ -115,10 +117,22 @@ function grafico(dados, L) {
     </svg>`;
 }
 
-const cartaoGrafico = `<div class="card pad" style="margin-bottom:16px"><p class="sub">Saldo de caixa: mensal (barras) e acumulado (linha)</p>
+const cartaoGrafico = `<div class="card pad" style="margin-bottom:16px"><p class="sub">Saldo de caixa da operação (receitas − custos − despesas, sem aportes): mensal (barras) e acumulado (linha)</p>
     <div class="grafico-area" id="grafico-caixa"></div>
     <div class="legend"><span><i style="background:var(--chart-1);border:0"></i>Saldo de caixa do mês</span>
       <span><i style="background:var(--chart-2);border:0;height:3px;vertical-align:3px"></i>Acumulado</span></div></div>`;
+
+/** Conciliação: saldo do Painel no mês de análise × saldo dos extratos (aba Saldo). */
+function kpiConciliacao(c) {
+  if (c.saldo_banco === null) {
+    return `<div class="card kpi"><p class="l">Conciliação com o extrato</p><p class="v tab">Sem extrato</p>
+      <p class="h">Nenhum saldo lançado em ${fmt.mesLongo(c.mes)}</p></div>`;
+  }
+  const confere = Math.abs(c.diferenca) < 0.01;
+  return `<div class="card kpi"><p class="l">Conciliação com o extrato</p>
+    <p class="v tab">${confere ? 'Confere' : fmt.moeda(c.diferenca)}</p>
+    <p class="h">${confere ? `Extrato ${fmt.moeda(c.saldo_banco)}` : 'Diferença: revise classificações ou o ajuste do saldo'}</p></div>`;
+}
 
 export async function render(el, { dataBase }) {
   el.innerHTML = carregando(12);
@@ -126,7 +140,8 @@ export async function render(el, { dataBase }) {
   const linhas = Object.fromEntries(dados.linhas.map((l) => [l.linha_excel, l]));
   const anos = [...new Set(dados.meses.map((m) => m.slice(0, 4)))];
   anoSelecionado ??= dados.datas.corte.slice(0, 4);
-  const divergencias = dados.linhas.filter((l) => l.extras?.FT === 'ERRO' || l.extras?.FU === 'ERRO').length;
+  const erros = divergentes(dados);
+  if (erros.length) console.warn('Painel: linha do tempo difere das colunas', erros.map((l) => l.linha_excel));
 
   const desenhar = () => {
     el.querySelector('#visao').innerHTML = visao === 'consolidado' ? tabelaConsolidado(dados)
@@ -136,6 +151,7 @@ export async function render(el, { dataBase }) {
       focarMesCorrente(el.querySelector('#visao'));
     }
     el.querySelector('#anos').hidden = visao === 'consolidado';
+    el.querySelector('#zeradas').classList.toggle('on', ocultarZeradas);
     el.querySelectorAll('[data-visao]').forEach((b) => b.classList.toggle('on', b.dataset.visao === visao));
     el.querySelectorAll('[data-ano]').forEach((b) => b.classList.toggle('on', b.dataset.ano === (anoSelecionado || '')));
   };
@@ -144,22 +160,26 @@ export async function render(el, { dataBase }) {
     <div class="cabecalho"><div>
       <div class="eyebrow">Painel · ${esc(dados.titulos.ate)}</div>
       <h2>Realizado × Projetado × EVE</h2>
-      <p>Corte realizado/projetado em ${fmt.mesLongo(dados.datas.corte)}. Valores de custos e despesas com sinal negativo, como na planilha.</p>
+      <p>Realizado até ${fmt.mesLongo(dados.datas.mes_analise)} (fontes do SharePoint) · projetado de ${fmt.mesLongo(dados.datas.corte)} em diante (Projeção dos setores). Custos e despesas com sinal negativo.</p>
     </div>
-    <div class="segmentado sem-impressao" role="tablist">
-      <button data-visao="consolidado">Consolidado</button><button data-visao="linha">Linha do tempo</button>
+    <div class="acoes-painel sem-impressao">
+      <button class="chip" id="zeradas" title="Esconde rubricas sem realizado, projetado e EVE">Ocultar linhas zeradas</button>
+      <div class="segmentado" role="tablist">
+        <button data-visao="consolidado">Consolidado</button><button data-visao="linha">Linha do tempo</button>
+      </div>
     </div></div>
     <div class="kpis">
-      <div class="card kpi"><p class="l">Receita total (VGV) · EVE</p><p class="v tab">${fmt.moeda(linhas[36].X)}</p></div>
+      <div class="card kpi"><p class="l">Receita total (VGV) · EVE</p><p class="v tab">${fmt.moeda(linhas[36].X)}</p>
+        <p class="h">Realizado ${fmt.moeda(linhas[36].H)}</p></div>
       <div class="card kpi"><p class="l">Margem operacional · realizado</p><p class="v tab">${fmt.moeda(linhas[59].H)}</p>
         <p class="h">EVE ${fmt.moeda(linhas[59].X)}</p></div>
       <div class="card kpi"><p class="l">EBITDA · realizado + projetado</p><p class="v tab">${fmt.moeda(linhas[79].T)}</p>
-        <p class="h">Desvio ${fmt.pct(linhas[79].AB)}</p></div>
-      <div class="card kpi"><p class="l">Exposição máxima</p><p class="v tab">${fmt.moeda(linhas[101].T)}</p></div>
+        <p class="h">EVE ${fmt.moeda(linhas[79].X)}</p></div>
+      <div class="card kpi"><p class="l">Exposição máxima</p><p class="v tab">${fmt.moeda(linhas[101].T)}</p>
+        <p class="h">Pior saldo acumulado da operação</p></div>
       <div class="card kpi destaque"><p class="l">Saldo de caixa (banco)</p><p class="v tab">${fmt.moeda(linhas[119].H)}</p>
-        <p class="h">Realizado até ${fmt.mesLongo(dados.datas.mes_analise)}</p></div>
-      <div class="card kpi"><p class="l">Verificações da planilha</p><p class="v tab">${divergencias ? `${divergencias} linha(s)` : 'Tudo confere'}</p>
-        <p class="h">${divergencias ? 'linha do tempo ≠ coluna (como no Excel)' : ''}</p></div>
+        <p class="h">Fim de ${fmt.mesLongo(dados.datas.mes_analise)}</p></div>
+      ${kpiConciliacao(dados.conciliacao)}
     </div>
     <div class="chips" id="anos" style="margin-bottom:12px">
       ${anos.map((a) => `<button class="chip" data-ano="${a}">${a}</button>`).join('')}<button class="chip" data-ano="">Todos</button>
@@ -167,5 +187,6 @@ export async function render(el, { dataBase }) {
     <div id="visao"></div></div>`;
   el.querySelectorAll('[data-visao]').forEach((b) => (b.onclick = () => { visao = b.dataset.visao; desenhar(); }));
   el.querySelectorAll('[data-ano]').forEach((b) => (b.onclick = () => { anoSelecionado = b.dataset.ano || ''; desenhar(); }));
+  el.querySelector('#zeradas').onclick = () => { ocultarZeradas = !ocultarZeradas; desenhar(); };
   desenhar();
 }

@@ -19,8 +19,9 @@ from backend.app.config import ARQUIVO_EXCEL
 from backend.app.excel_funcoes import DATA_ZERO
 from backend.app.fontes.excel import ler_planilha
 from backend.app.fontes.montagem import montar_base
+from backend.app.excel_funcoes import chave_texto
 from backend.app.motor.painel import calcular_painel
-from backend.app.motor.resumo import calcular_resumo
+from backend.app.motor.resumo import calcular_resumo, receitas_do_mes
 
 pytestmark = pytest.mark.skipif(not ARQUIVO_EXCEL.exists(), reason="planilha de referência ausente")
 
@@ -96,6 +97,25 @@ def _ajuste_saidas(cenario, resumo) -> dict:
             for celula, sinal in ((f"H{r}", -1), (f"J{r}", 1), (f"U{r}", 1), ("H5", -1), ("J5", 1),
                                   ("U5", 1), ("Z7", 1), ("Z9", 1)):
                 ajustes[celula] = ajustes.get(celula, 0) + sinal * delta
+    return ajustes
+
+
+def _ajuste_receitas(cenario, resumo) -> dict:
+    """Correção aprovada (out/2026): a receita do mês (Z6) é tudo o que a aba Recebidas registra
+    no mês. A planilha usava as entradas do Controle Entradas que não são aporte (rendimentos).
+    A diferença entra com sinal trocado no aporte (Z9)."""
+    mes = resumo["datas"]["mes_atual"]
+    aportes = {chave_texto(c) for c in ("Aporte", "Aporte Holding")}
+    planilha = sum(m.valor for m in cenario["base"].entradas if m.fim_mes == mes
+                   and chave_texto((m.classificacao or "").strip()) not in aportes)
+    delta = receitas_do_mes(cenario["base"], mes) - planilha
+    return {"Z6": delta, "Z9": -delta}
+
+
+def _ajustes_resumo(cenario, resumo) -> dict:
+    ajustes = _ajuste_saidas(cenario, resumo)
+    for celula, delta in _ajuste_receitas(cenario, resumo).items():
+        ajustes[celula] = ajustes.get(celula, 0) + delta
     if "Z9" in ajustes:
         ajustes["Z10"] = ajustes["Z9"] * 0.85
         ajustes["Z11"] = ajustes["Z9"] * 0.15
@@ -116,7 +136,7 @@ def test_resumo(cenario):
         for campo, coluna in COLUNAS_RESUMO.items():
             if campo in linha:
                 celulas[f"{coluna}{linha['linha_excel']}"] = linha[campo]
-    blocos = {"aporte_mes": [("saldo_anterior", 5), ("receita_projetada", 6), ("custo_mes", 7),
+    blocos = {"aporte_mes": [("saldo_anterior", 5), ("receita_mes", 6), ("custo_mes", 7),
                              ("caixa_minimo", 8), ("aporte_total", 9), ("investidor", 10), ("joy", 11)],
               "aporte_proximo": [("receita_projetada", 21), ("custo_projetado", 22), ("caixa_minimo", 23)]}
     for bloco, campos in blocos.items():
@@ -129,7 +149,9 @@ def test_resumo(cenario):
                     "S3": titulos["projetado_proximo"], "Y5": titulos["saldo_anterior"],
                     "B4": resumo["datas"]["mes_atual"],
                     "L4": resumo["datas"]["a_pagar_ate"], "AD3": resumo["datas"]["mes_analise"]})
-    _comparar(cenario["planilha"].livro["Resumo"], celulas, "Resumo", _ajuste_saidas(cenario, resumo))
+    aporte = resumo["aporte_mes"]["aporte_total"]
+    assert aporte > 0, "o ajuste de Z9 supõe aporte positivo (sem o piso de zero)"
+    _comparar(cenario["planilha"].livro["Resumo"], celulas, "Resumo", _ajustes_resumo(cenario, resumo))
 
     # Toda fórmula das colunas de valor precisa estar coberta.
     formulas = cenario["formulas"]["Resumo"]
@@ -137,6 +159,36 @@ def test_resumo(cenario):
                 for c in linha if c.column_letter in COLUNAS_RESUMO.values()
                 and _eh_formula(c.value) and c.coordinate not in celulas]
     assert not faltando, faltando
+
+
+# Correções aprovadas na revisão do Painel (out/2026; ver motor/painel.py, P1..P11). As células
+# abaixo podem divergir da planilha; todas as outras precisam bater. As regras novas são
+# verificadas em test_regras_aporte.py (seção Painel) e nos testes de invariantes abaixo.
+COLUNAS_CORRIGIDAS = {"L", "P", "T", "AB", "FS", "FT", "FU", "FV"}          # P2, P3, P4, P10
+LINHAS_TOTAIS_CORRIGIDAS = {59, 79, 83, 93, 95, 101}                       # P6, P11, P4
+LINHAS_TL_CORRIGIDAS = {32, 36, 41, 105, 106, 119, 122}                    # P5, P7, P9
+LINHAS_SEM_EVE = set(range(105, 117)) | {119}                              # P11
+LINHAS_REMOVIDAS = {117}                                                   # auxiliar sem uso
+
+
+def _corrigida(celula: str, mes_analise, meses) -> bool:
+    coluna = celula.rstrip("0123456789")
+    linha = int(celula[len(coluna):])
+    if linha in LINHAS_REMOVIDAS or (linha == 122 and coluna in ("J", "N")):
+        return True
+    if coluna in COLUNAS_CORRIGIDAS:
+        return True
+    if coluna in ("H", "X", "Y") and linha in LINHAS_TOTAIS_CORRIGIDAS:
+        return True
+    if coluna == "X" and linha in LINHAS_SEM_EVE:
+        return True
+    i = column_index_from_string(coluna) - COLUNA_INICIO_TL
+    if 0 <= i < len(meses) and linha >= 24:
+        if linha in LINHAS_TL_CORRIGIDAS or linha in LINHAS_TOTAIS_CORRIGIDAS:
+            return True
+        if 43 <= linha <= 76 and meses[i] <= mes_analise:                  # P1: só realizado
+            return True
+    return False
 
 
 def test_painel(cenario):
@@ -162,12 +214,30 @@ def test_painel(cenario):
 
     valores = cenario["planilha"].livro["Painel"]
     formulas = cenario["formulas"]["Painel"]
-    # Só compara células que existem na planilha (as demais são vazias lá).
-    existentes = {c: v for c, v in celulas.items() if formulas[c].value is not None}
+    corrigida = lambda c: _corrigida(c, painel["datas"]["mes_analise"], painel["meses"])
+    # Só compara células que existem na planilha (as demais são vazias lá) e não corrigidas.
+    existentes = {c: v for c, v in celulas.items() if formulas[c].value is not None and not corrigida(c)}
+    assert len(existentes) > 2500, len(existentes)          # a maior parte do Painel segue a planilha
     _comparar(valores, existentes, "Painel")
 
     faltando = [c.coordinate for linha in formulas.iter_rows(min_row=24, max_row=122)
                 for c in linha if _eh_formula(c.value)
                 and get_column_letter(c.column) in COLUNAS_PAINEL_COBERTAS
-                and c.coordinate not in celulas]
+                and c.coordinate not in celulas and not corrigida(c.coordinate)]
     assert not faltando, faltando
+
+
+def test_painel_invariantes_com_dados_da_planilha(cenario):
+    """Com os dados reais da planilha, as regras da revisão se sustentam."""
+    painel = cenario["painel"]
+    linhas = {l.linha_excel: l for l in painel["linhas"]}
+    for l in painel["linhas"]:                               # linha do tempo × colunas
+        if "FT" in l.extras:
+            assert l.extras["FT"] == l.extras["FU"] == "OK!", l.linha_excel
+    i = painel["meses"].index(painel["datas"]["mes_analise"])
+    assert math.isclose(linhas[122].tl[i], linhas[119].H, abs_tol=0.005)    # acumulado = saldo A
+    # Realizado de custos e despesas (A) continua igual à planilha.
+    excel = cenario["planilha"].livro["Painel"]
+    for r in range(43, 77):
+        if r in linhas and linhas[r].grupo in ("custo", "despesa") and excel[f"H{r}"].value is not None:
+            assert math.isclose(linhas[r].H, excel[f"H{r}"].value, abs_tol=0.005), r

@@ -127,6 +127,7 @@ main { padding: 24px var(--gutter) 96px; }
 .a-error { border-color: rgb(198 40 40 / .3); background: var(--error-soft); color: var(--error); }
 .a-info { border-color: rgb(37 99 168 / .3); background: var(--info-soft); color: var(--info); }
 
+.acoes-painel { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
 .kpi { padding: 14px 16px; position: relative; overflow: hidden; }
 .kpi p { margin: 0; }

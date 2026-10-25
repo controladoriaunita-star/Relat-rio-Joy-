@@ -1,9 +1,12 @@
-// Aba Dashboards: exposição de caixa, gasto × projetado, recebimentos, custos por rubrica,
+// Aba Dashboards: exposição de caixa (oculta, ver MOSTRAR_EXPOSICAO), gasto × projetado, recebimentos, custos por rubrica,
 // setores que mais gastaram e acerto da projeção. Os números vêm de /api/dashboards, com as
 // mesmas definições do Resumo, do Painel e da Projeção.
 import { api, carregando, esc, fmt, montarGrafico } from '../util.js';
 
 const COR = { c1: 'var(--chart-1)', c2: 'var(--chart-2)', c3: 'var(--chart-3)' };
+// Gráfico de exposição de caixa oculto a pedido da controladoria (out/2026). O cálculo continua
+// no backend; para voltar a exibir, basta trocar para true.
+const MOSTRAR_EXPOSICAO = false;
 const estado = { setorGasto: '', periodoSetores: 'total', periodoAcerto: 'analise' };
 const soma = (lista, f) => lista.reduce((a, x) => a + f(x), 0);
 const ate = (iso, limite) => iso <= limite;
@@ -297,9 +300,9 @@ export async function render(el, ctx) {
         <div class="eyebrow">Dashboards</div><h2>Caixa, custos e projeção</h2>
         <p>Mês corrente ${fmt.mesLongo(d.datas.mes_atual)} · realizado até ${fmt.mesLongo(d.datas.mes_analise)} · dados de ${fmt.dataHora(d.ultima_atualizacao)}</p>
       </div></div>
-      <div class="dashboard">${cartaoExposicao(d)}${cartaoGasto(d)}${cartaoRecebimentos(d)}${cartaoCustos(d)}${cartaoSetores(d)}${cartaoAcerto(d)}</div>
+      <div class="dashboard">${MOSTRAR_EXPOSICAO ? cartaoExposicao(d) : ''}${cartaoGasto(d)}${cartaoRecebimentos(d)}${cartaoCustos(d)}${cartaoSetores(d)}${cartaoAcerto(d)}</div>
     </div>`;
-    montarGrafico(el.querySelector('#g-exposicao'), (L) => graficoExposicao(d.exposicao, L));
+    if (MOSTRAR_EXPOSICAO) montarGrafico(el.querySelector('#g-exposicao'), (L) => graficoExposicao(d.exposicao, L));
     const meses = janelaGasto(d);
     montarGrafico(el.querySelector('#g-gasto'), (L) => graficoBarras(meses, [
       { rotulo: 'Projetado', cor: COR.c2, valores: seriesSetor(d, estado.setorGasto, 'projetado', meses) },

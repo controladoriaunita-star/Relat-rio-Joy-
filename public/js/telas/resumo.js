@@ -74,16 +74,16 @@ function divisao(a) {
 function blocoAporteMes(d) {
   const a = d.aporte_mes;
   return `<section class="card bloco-aporte destaque-aporte">
-    <p class="sub">Aporte do mês · ${fmt.mesLongo(d.datas.mes_atual)}</p>
+    <p class="sub">Aporte necessário no mês · ${fmt.mesLongo(d.datas.mes_atual)}</p>
     <p class="numero-heroi">${valorAporte(a.aporte_total)}</p>
     ${divisao(a)}
     <div class="extrato">
       ${par(esc(d.titulos.saldo_anterior), moeda(a.saldo_anterior))}
-      ${par('Receita do mês', moeda(a.receita_projetada))}
+      ${par('Receitas do mês (Recebidas)', moeda(a.receita_mes))}
       ${par(esc(d.titulos.custo_mes), moeda(a.custo_mes))}
       ${par('Caixa mínimo', moeda(a.caixa_minimo))}
     </div>
-    <p class="nota">Aporte = custo do mês + caixa mínimo − saldo − receita. Cobre as contas do mês e mantém ${moeda(a.caixa_minimo)} em caixa.</p>
+    <p class="nota">Aporte = custo do mês + caixa mínimo − saldo − receitas do mês. Receitas = tudo o que a aba Recebidas registra no mês (hoje, os aportes do investidor), então o valor acima é o que ainda falta aportar. Cobre as contas do mês e mantém ${moeda(a.caixa_minimo)} em caixa.</p>
   </section>`;
 }
 
@@ -93,11 +93,12 @@ function blocoConta(d) {
     <p class="sub">Conta da SPE · ${fmt.mesLongo(d.datas.mes_atual)}</p>
     <div class="extrato">
       ${par('Saldo inicial (fim do mês anterior)', moeda(c.saldo_inicial))}
-      ${par('(+) Receitas do mês', moeda(c.receitas))}
-      ${par('(+) Aporte do mês', moeda(c.aporte))}
+      ${par('(+) Receitas do mês (Recebidas)', moeda(c.receitas))}
+      ${c.receitas_investidor ? par('dos quais aporte do investidor', moeda(c.receitas_investidor), 'sub-par') : ''}
+      ${par('(+) Aporte necessário', moeda(c.aporte))}
       ${par('(−) Custos do mês (pago + a pagar + projetado)', moeda(-c.custos))}
       ${par('Saldo projetado no fim do mês', moeda(c.saldo_final), 'forte destaque')}
-      ${par('Aportes já recebidos no mês', moeda(c.aportes_recebidos))}
+      ${par('Transferências da holding no mês', moeda(c.transferencias_holding))}
       ${par('Aporte a receber', moeda(c.aporte_a_receber), 'forte')}
     </div></section>`;
 }
@@ -139,8 +140,8 @@ function blocoCronograma(d, podeEditar) {
       ${c.programado ? '' : '<p class="nota">Ainda não programado: parcela única no dia 1.</p>'}
       <div class="parcelas">${parcelas}</div>
       <div class="extrato">
-        ${par('Aporte do mês', moeda(c.total), 'forte destaque')}
-        ${par('Já recebido no mês', moeda(c.recebido))}
+        ${par('Aporte necessário', moeda(c.total), 'forte destaque')}
+        ${par('Já recebido da holding no mês', moeda(c.recebido))}
       </div>`}
   </section>`;
 }

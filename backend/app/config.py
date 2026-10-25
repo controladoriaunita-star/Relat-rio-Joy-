@@ -51,5 +51,3 @@ GRAPH_ITEM_ID = os.environ.get("GRAPH_ITEM_ID", "")
 EMPRESA_SPE = 73                                  # código da SPE Evans no UAU
 CLIENTE_INVESTIDOR = 8213                         # Recebidas[CódigoCliente] do investidor
 HISTORICO_APORTE_INVESTIDOR = "APORTE Bapema Kalil Evans I Spe Ltda"
-MES_INICIO_RECEBIDAS_NO_APORTE = 30               # índice do mês (jul/2026) a partir do qual
-                                                  # o Painel soma Recebidas na linha 106

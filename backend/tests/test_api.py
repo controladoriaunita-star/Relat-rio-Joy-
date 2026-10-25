@@ -137,10 +137,9 @@ def test_resumo_realizado_igual_planilha(ambiente):
             esperado = (excel[f"H{r}"].value or 0) + (excel[f"J{r}"].value or 0)
             assert math.isclose(linha["pago_ate"] + linha["pago_mes"], esperado, abs_tol=0.005), linha["rubrica"]
         assert math.isclose(linha["a_pagar"], excel[f"L{r}"].value or 0, abs_tol=0.005), linha["rubrica"]
-    for campo, celula in (("saldo_anterior", "Z5"), ("receita_projetada", "Z6")):
-        assert math.isclose(resumo["aporte_mes"][campo], excel[celula].value, abs_tol=0.005)
+    assert math.isclose(resumo["aporte_mes"]["saldo_anterior"], excel["Z5"].value, abs_tol=0.005)
     a, c = resumo["aporte_mes"], resumo["conta"]
-    assert math.isclose(c["saldo_final"], a["saldo_anterior"] + a["receita_projetada"] + a["aporte_total"]
+    assert math.isclose(c["saldo_final"], a["saldo_anterior"] + a["receita_mes"] + a["aporte_total"]
                         - a["custo_mes"])
     assert c["saldo_final"] >= a["caixa_minimo"] - 0.005
 
@@ -148,6 +147,7 @@ def test_resumo_realizado_igual_planilha(ambiente):
 def test_painel_serializa(ambiente):
     painel = cliente(ambiente, "dora.dir").get(f"/api/painel?data={HOJE}").json()
     assert len(painel["meses"]) == 84
+    assert set(painel["conciliacao"]) == {"mes", "saldo_painel", "saldo_banco", "diferenca"}
     terreno = next(l for l in painel["linhas"] if l["linha_excel"] == 43)
     assert math.isclose(terreno["H"], ambiente["excel"]["Painel"]["H43"].value, abs_tol=0.005)
 
@@ -369,8 +369,9 @@ def test_dashboards_coerentes_com_resumo_e_projecao(ambiente):
     assert d["exposicao"]["pontos"]["B"]["valor"] == min(p["acumulado"] for p in serie)
     mes = d["recebimentos"][-1]
     assert mes["mes"] == resumo["datas"]["mes_atual"]
-    assert math.isclose(mes["investidor"] + mes["holding"], resumo["conta"]["aportes_recebidos"])
-    assert math.isclose(mes["receitas"], resumo["aporte_mes"]["receita_projetada"])
+    # Recebidas do mês = receitas do Resumo; transferências da holding batem com a conta da SPE.
+    assert math.isclose(mes["investidor"] + mes["receitas"], resumo["aporte_mes"]["receita_mes"])
+    assert math.isclose(mes["holding"], resumo["conta"]["transferencias_holding"])
     comparativo = dir_.get(f"/api/projecao/comparativo?mes={resumo['datas']['mes_atual']}").json()
     no_mes = [v for valores in d["setores"]["valores"].values() for v in valores if v["mes"] == resumo["datas"]["mes_atual"]]
     assert math.isclose(sum(v["incorrido"] for v in no_mes), comparativo["totais"]["incorrido"])

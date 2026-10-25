@@ -11,8 +11,15 @@ Reproduz as fórmulas da aba Resumo da planilha; a célula de origem está no co
     uma base fixa de 780.000).
   * Aporte do próximo mês segue a mesma regra do aporte do mês, partindo do saldo final
     projetado e considerando a receita projetada.
+  * Receitas do mês = tudo o que a aba Recebidas (SharePoint) registra no mês selecionado
+    (out/2026). A Recebidas é o banco de recebimentos da SPE e hoje traz os aportes do
+    investidor; quando houver vendas, elas entram pela mesma tabela. Como o que já entrou
+    no mês reduz o que falta aportar, o "aporte do mês" passa a ser o aporte ainda necessário.
 
 Regra do aporte: cobrir os custos do mês e terminar com o caixa mínimo; nunca negativo.
+
+    aporte necessário = custos do mês + caixa mínimo − saldo do fim do mês anterior
+                        − receitas do mês (Recebidas)
 """
 from __future__ import annotations
 
@@ -20,11 +27,10 @@ from datetime import date
 
 from ..catalogo import LINHAS_RESUMO, Premissas
 from ..config import CLIENTE_INVESTIDOR, EMPRESA_SPE
-from ..excel_funcoes import DATA_ZERO, chave_texto, eomonth, texto_data, texto_igual, texto_mes
+from ..excel_funcoes import DATA_ZERO, eomonth, texto_data, texto_igual, texto_mes
 from .base import Base, somar
 
 TIPO_PROJETADO_TOTAL = "Projetado Total"    # Resumo N3
-CLASSIFICACOES_APORTE = {chave_texto(c) for c in ("Aporte", "Aporte Holding")}   # Resumo A50
 
 
 def _ou_zero(data: date | None) -> date:
@@ -91,7 +97,8 @@ def aporte_necessario(saldo: float, receita: float, caixa_minimo: float, custo: 
 
 def cronograma_do_aporte(premissas: Premissas, mes: date, aporte: float, recebidos: float) -> dict:
     """Parcelas do aporte do mês: data, percentual e valor. A última parcela fica com o
-    arredondamento, para a soma ser exatamente o aporte. Status pelo que já foi recebido."""
+    arredondamento, para a soma ser exatamente o aporte. Status pelo que já foi recebido
+    fora da Recebidas (transferências da holding): a Recebidas já abateu o aporte."""
     gravadas = premissas.cronogramas_aporte.get(mes.strftime("%Y-%m"))
     parcelas = gravadas or [{"data": mes.replace(day=1).isoformat(), "percentual": 100.0}]
     valores = [round(aporte * p["percentual"] / 100, 2) for p in parcelas]
@@ -113,17 +120,23 @@ def cronograma_do_aporte(premissas: Premissas, mes: date, aporte: float, recebid
     return {"programado": bool(gravadas), "parcelas": saida, "total": aporte, "recebido": recebidos}
 
 
-def _receita_do_mes(base: Base, mes: date) -> float:
-    """Resumo Z6: entradas do mês que não são aporte (rendimentos e outras receitas)."""
-    return somar(base.entradas, lambda m: m.fim_mes == mes
-                 and chave_texto((m.classificacao or "").strip()) not in CLASSIFICACOES_APORTE)
+def receitas_do_mes(base: Base, mes: date) -> float:
+    """Resumo Z6: tudo o que a aba Recebidas registra no mês (qualquer dia do mês, qualquer
+    cliente). É a receita usada no cálculo do aporte. Rendimentos de aplicação (Controle
+    Entradas) não entram: a fonte de receitas da SPE é a Recebidas."""
+    return somar(base.recebidas, lambda r: r.fim_mes == mes)
 
 
-def _aportes_recebidos(base: Base, mes: date) -> float:
-    """Resumo Z14 (por mês): recebimentos do investidor e transferências para a SPE no mês."""
-    return (somar(base.recebidas, lambda r: r.fim_mes == mes and r.cliente == CLIENTE_INVESTIDOR)
-            + somar(base.transferencias, lambda t: t.empresa != EMPRESA_SPE
-                    and t.empresa_credito == EMPRESA_SPE and t.fim_mes == mes))
+def _recebidas_do_investidor(base: Base, mes: date) -> float:
+    """Parte das receitas do mês que é aporte do investidor (Recebidas do CLIENTE_INVESTIDOR)."""
+    return somar(base.recebidas, lambda r: r.fim_mes == mes and r.cliente == CLIENTE_INVESTIDOR)
+
+
+def _transferencias_da_holding(base: Base, mes: date) -> float:
+    """Transferências de outras empresas do grupo para a SPE no mês. São aportes que não
+    passam pela Recebidas: não reduzem o aporte necessário e contam como parte dele já recebida."""
+    return somar(base.transferencias, lambda t: t.empresa != EMPRESA_SPE
+                 and t.empresa_credito == EMPRESA_SPE and t.fim_mes == mes)
 
 
 def calcular_resumo(base: Base, hoje: date, viabilidade: dict[str, float],
@@ -165,13 +178,14 @@ def calcular_resumo(base: Base, hoje: date, viabilidade: dict[str, float],
 
     # Bloco "Relatório de Aporte" (colunas Y:Z): aporte do mês corrente
     saldo_anterior = saldo_fim_de_mes(base, eomonth(mes_analise))                 # Z5
-    receita_mes = _receita_do_mes(base, mes)                                      # Z6
+    receita_mes = receitas_do_mes(base, mes)                                      # Z6 (Recebidas)
     custo_mes = sum((por_linha[r].get("pago_mes") or 0) + por_linha[r]["a_pagar"]
                     + por_linha[r]["projetado_mes"] for r in range(7, 42))          # Z7
     aporte_total = aporte_necessario(saldo_anterior, receita_mes, premissas.caixa_minimo, custo_mes)  # Z9
 
-    # Conta da SPE (Z13:Z18): fluxo do mês com o aporte necessário
-    recebidos = _aportes_recebidos(base, mes)
+    # Conta da SPE (Z13:Z18): fluxo do mês. As Recebidas já estão nas receitas; das
+    # transferências da holding, o que entrou abate o aporte que ainda falta receber.
+    transferencias = _transferencias_da_holding(base, mes)
     saldo_final = saldo_anterior + receita_mes + aporte_total - custo_mes
 
     # Próximo mês (Z20:Z26): mesma regra, a partir do saldo final projetado
@@ -199,18 +213,20 @@ def calcular_resumo(base: Base, hoje: date, viabilidade: dict[str, float],
         "linhas": linhas,
         "total": total,
         "aporte_mes": {
-            "saldo_anterior": saldo_anterior, "receita_projetada": receita_mes,
+            "saldo_anterior": saldo_anterior, "receita_mes": receita_mes,
             "custo_mes": custo_mes, "caixa_minimo": premissas.caixa_minimo,
             "aporte_total": aporte_total, "investidor": aporte_total * pi, "joy": aporte_total * pj},
         "conta": {
             "saldo_inicial": saldo_anterior, "receitas": receita_mes, "aporte": aporte_total,
             "custos": custo_mes, "saldo_final": saldo_final,
-            "aportes_recebidos": recebidos, "aporte_a_receber": max(0.0, aporte_total - recebidos)},
+            "receitas_investidor": _recebidas_do_investidor(base, mes),
+            "transferencias_holding": transferencias,
+            "aporte_a_receber": max(0.0, aporte_total - transferencias)},
         "aporte_proximo": {
             "saldo_anterior": saldo_final, "receita_projetada": premissas.receita_projetada_proximo,
             "custo_projetado": custo_proximo, "custo_automatico": custo_automatico,
             "caixa_minimo": premissas.caixa_minimo_proximo, "aporte_total": aporte_proximo,
             "investidor": aporte_proximo * pi, "joy": aporte_proximo * pj},
-        "cronograma_aporte": cronograma_do_aporte(premissas, mes, aporte_total, recebidos),
+        "cronograma_aporte": cronograma_do_aporte(premissas, mes, aporte_total, transferencias),
         "ultima_atualizacao": base.ultima_atualizacao,
     }

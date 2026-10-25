@@ -16,7 +16,6 @@ from datetime import date
 from ..config import CLIENTE_INVESTIDOR, EMPRESA_SPE, HISTORICO_APORTE_INVESTIDOR
 from ..excel_funcoes import DATA_ZERO, chave_texto, eomonth, texto_igual
 from .base import Base
-from .resumo import CLASSIFICACOES_APORTE
 
 
 def _n(v) -> float:
@@ -59,11 +58,11 @@ def recebimentos(base: Base, ate: date) -> list[dict]:
     """Recebimentos por mês, direto das fontes e pelo fim de mês, até o mês corrente:
     investidor = Recebidas do investidor + entradas "Aporte" do investidor (Painel 106);
     holding = transferências para a SPE + entradas "Aporte Holding" (Painel 112);
-    receitas = entradas que não são aporte (Resumo Z6)."""
+    receitas = Recebidas de outros clientes (vendas; Painel 25).
+    No mês corrente, investidor (parte da Recebidas) + receitas = receitas do Resumo (Z6)."""
     por_mes = defaultdict(lambda: {"investidor": 0.0, "holding": 0.0, "receitas": 0.0})
     for r in base.recebidas:
-        if r.cliente == CLIENTE_INVESTIDOR:
-            por_mes[r.fim_mes]["investidor"] += r.valor
+        por_mes[r.fim_mes]["investidor" if r.cliente == CLIENTE_INVESTIDOR else "receitas"] += r.valor
     for t in base.transferencias:
         if t.empresa != EMPRESA_SPE and t.empresa_credito == EMPRESA_SPE:
             por_mes[t.fim_mes]["holding"] += t.valor
@@ -73,8 +72,6 @@ def recebimentos(base: Base, ate: date) -> list[dict]:
             por_mes[e.fim_mes]["investidor"] += e.valor
         elif classe == chave_texto("Aporte Holding"):
             por_mes[e.fim_mes]["holding"] += e.valor
-        elif classe not in CLASSIFICACOES_APORTE:
-            por_mes[e.fim_mes]["receitas"] += e.valor
     meses = sorted(m for m in por_mes if m <= ate and m > DATA_ZERO)
     if not meses:
         return []

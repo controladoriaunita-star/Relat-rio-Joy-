@@ -88,7 +88,7 @@ class Premissas:
     caixa_minimo_proximo: float = 100000    # Resumo Z23
     participacao_investidor: float = 0.85   # Resumo Z10/Z25 e Y34/Y38
     participacao_joy: float = 0.15          # Resumo Z11/Z26 e Y35/Y39
-    ajuste_saldo_banco: float = 372288.53   # Painel H119 (constante somada ao saldo)
+    ajuste_saldo_banco: float = 372288.53   # Painel H119: saldo inicial + o que as fontes não trazem
     # Cronograma do aporte do mês (Resumo Y32:Y43): "AAAA-MM" → parcelas [{"data", "percentual"}].
     # O percentual é do aporte necessário do mês, então as parcelas sempre somam o aporte.
     # Mês sem cronograma: parcela única no dia 1.
@@ -101,7 +101,6 @@ class Premissas:
 # --- Painel -----------------------------------------------------------------------
 INICIO_LINHA_DO_TEMPO = date(2024, 1, 31)   # Painel CE23
 MESES_LINHA_DO_TEMPO = 84                   # CE..FJ = jan/2024 a dez/2030
-MESES_SEM_INVERSAO_SINAL = 12               # CE..CP (2024) não multiplicam por -1
 
 # Receitas: valor previsto no EVE (coluna X) por linha do Painel.
 RECEITAS_EVE = {
@@ -127,11 +126,6 @@ PREMISSAS_DESEMBOLSO = {
     45: {"valor_mes": None, "valor_total": 14952244.656201007, "primeiro_mes": None, "parcelas": None},
 }
 
-# Painel linhas 43..56: o termo de Controle_Entradas usa uma referência relativa
-# (R43C[-79] / R43C[-75]) que aponta para células diferentes da linha 43 a cada mês.
-# Só as células de texto podem casar com Classificação; estas são as únicas:
-# D43, AI43 e CC43 = "Terreno"; AS43 = "OU". Chave = índice do mês na linha do tempo.
-ROTULO_ENTRADAS_CUSTOS_POR_MES = {0: "Terreno", 27: "Terreno", 37: "OU", 73: "Terreno"}
 
 # --- Setores e linhas de projeção (carga inicial; editável pelo admin) -------------
 SETORES_PADRAO = [

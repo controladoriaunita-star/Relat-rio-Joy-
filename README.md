@@ -55,8 +55,8 @@ do `.env`, então "Atualizar do SharePoint" funciona como em produção.
 | Aba | Conteúdo | Quem acessa |
 |---|---|---|
 | Resumo | Layout da aba Resumo da planilha: tabela por rubrica e Relatório de Aporte (aporte do mês, conta da SPE, próximo mês e aportes programados) | admin, diretor |
-| Dashboards | Exposição de caixa (pontos A–D: investimento inicial, máxima exposição, primeiro fluxo positivo, equilíbrio), gasto × projetado, recebimentos, custos por rubrica, setores que mais gastaram e acerto da projeção | admin, diretor |
-| Painel | Realizado × Projetado × EVE (colunas A–F), verificação da planilha e linha do tempo jan/2024–dez/2030 | admin, diretor |
+| Dashboards | Gasto × projetado, recebimentos, custos por rubrica, setores que mais gastaram e acerto da projeção. A exposição de caixa (pontos A–D) está oculta: `MOSTRAR_EXPOSICAO` em `dashboards.js` | admin, diretor |
+| Painel | Realizado × Projetado × EVE (colunas A–F), conciliação com o extrato e linha do tempo jan/2024–dez/2030 | admin, diretor |
 | Projeção | Grade mensal por setor/linha; o total por rubrica alimenta o "Projetado" do Resumo e do Painel | todos; cada setor edita as suas linhas |
 | API's | Validador das 7 fontes, pendências de classificação, saldos bancários, viabilidade, usuários, permissões e histórico | admin, diretor |
 
@@ -164,8 +164,11 @@ Os testes usam SQLite; o mesmo SQL roda no Postgres do Supabase.
 
 ## 7. Diferenças e comportamentos da planilha
 
-**Regra do aporte:** aporte do mês = custos do mês (pago + a pagar + projetado) + caixa mínimo
+**Regra do aporte:** aporte necessário = custos do mês (pago + a pagar + projetado) + caixa mínimo
 (R$ 100 mil) − saldo bancário do fim do mês anterior − receitas do mês; nunca negativo.
+**Receitas do mês** = tudo o que a aba **Recebidas** registra no mês selecionado (qualquer
+cliente, qualquer dia do mês). Hoje a Recebidas traz os aportes do investidor; quando houver
+vendas, elas entram pela mesma tabela. Por isso o aporte mostrado é o que ainda falta aportar.
 Divisão: 85% investidor e 15% Joy+. Tudo segue o mês da data-base: qualquer data dentro do mês
 entra naquele mês (fim de mês).
 
@@ -173,7 +176,8 @@ entra naquele mês (fim de mês).
 
 1. **Controle Saídas** entram pelo mês da data. A planilha só contava como "Pago no Mês" a
    saída do último dia do mês; as demais caíam em "Pago Total até" o mês anterior.
-2. **Receita do mês** não inclui entradas classificadas como Aporte / Aporte Holding.
+2. **Receita do mês** vem da aba Recebidas (out/2026). Antes eram as entradas do Controle
+   Entradas que não são aporte (rendimentos de aplicação, que deixaram de entrar no aporte).
 3. **Conta da SPE** é o fluxo do mês: saldo inicial + receitas + aporte − custos = saldo final
    (o caixa mínimo, quando há aporte), com os aportes já recebidos no mês e o que falta receber.
    A planilha usava o saldo de dois meses antes, todos os recebimentos desde o início e uma
@@ -189,15 +193,36 @@ entra naquele mês (fim de mês).
    custos mudem. O status (recebido, parcial, a receber) compara com os aportes já recebidos
    no mês. Sem cronograma, é parcela única no dia 1. Na planilha eram dois valores fixos de
    425.000 rotulados "85% Joy+ · 15% Bapema"; aqui a divisão é Investidor 85% · Joy+ 15%.
+   Como as Recebidas já abatem o aporte, o status das parcelas usa só as transferências da
+   holding no mês ("Aporte a receber" = aporte necessário − transferências da holding).
 
 O teste de regressão compara todas as demais células com o Excel e calcula, a partir dos
 dados, a diferença esperada do item 1. `test_regras_aporte.py` cobre as regras acima.
 
+**Revisão do Painel (out/2026)** — detalhes em `backend/app/motor/painel.py` (P1–P11):
+
+- **Corte único:** coluna A = realizado até o mês de análise (fim do mês anterior à data-base);
+  B = projeção do mês corrente; C = projeção do mês corrente até dez/2030; D = A + C. Meses
+  passados mostram só o realizado. A planilha somava a projeção de todos os meses em C (contando
+  em dobro o que já foi realizado), deixava B sempre zero e deixava o mês corrente fora de A e C
+  em receitas, resultado e sócios.
+- **Totais:** Margem Operacional = Receita Líquida − custos (era só a soma dos custos); Resultado
+  e Saldo de Caixa passam a ter o realizado (coluna A era zero fixo). F = % do EVE (receitas:
+  D ÷ E; custos e despesas: % consumido, em vermelho acima de 100%).
+- **Recebidas:** aportes do investidor na linha Aporte Investidor em todos os meses; Recebidas de
+  outros clientes (vendas) em Clientes - Direto com SPE. Rendimentos pelo mês da data.
+- **Caixa:** a linha do tempo do Saldo de Caixa (Banco) é o fluxo do mês (operação + sócios) e a
+  linha "Saldo de caixa acumulado (banco)" acumula a partir do ajuste inicial (premissa). No mês
+  de análise ela é igual à coluna A, e o cartão **Conciliação com o extrato** compara com a aba
+  Saldo: diferença ≠ 0 indica lançamento sem classificação ou ajuste a revisar.
+- **Limpeza:** sem `#VALOR!`, sem sinal invertido em 2024, coluna E vazia onde não há EVE
+  (sócios, saldo do banco) e Resultado / VGV só no EVE. Botão "Ocultar linhas zeradas".
+
+`test_regressao_excel.py` continua comparando com a planilha todas as células que não estão na
+lista de correções (`COLUNAS_CORRIGIDAS`, `LINHAS_*_CORRIGIDAS`), e verifica com os dados da
+planilha que a linha do tempo bate com as colunas e que o acumulado bate com o saldo.
+
 Comportamentos da planilha mantidos (cobertos pela regressão):
 
-1. **Painel, coluna B (Projetado Mês)** filtra o tipo "Projetado (Mês)", que nenhuma linha usa: é sempre 0.
-2. **Painel, coluna C (Projetado Total)** soma a projeção de **todos** os meses, inclusive os passados.
-3. **Linha do tempo de custos/despesas**: em 2024 o sinal não é invertido. Em meses passados sem
-   realizado, entra o projetado do mês.
-4. **Painel H119** (ajuste 372.288,53) é premissa editável.
-5. **Painel L101** e **J122** dão `#VALUE!` na planilha e aparecem como `#VALOR!`.
+1. **Painel H119** (ajuste 372.288,53) é premissa editável: saldo inicial e o que as fontes não trazem.
+2. Realizado de custos e despesas (coluna A) e EVE de cada rubrica, iguais à planilha.
