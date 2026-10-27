@@ -79,12 +79,12 @@ As concessões são ajustadas em API's › Permissões (matriz papel × permiss�
 papel `admin` fica sempre com todas. O backend valida cada rota pela permissão; as funções
 `auth_has_permission`, `auth_is_admin` e `auth_my_permissions` ficam no banco para uso futuro.
 
-**Login (temporariamente inativo):** com `APORTE_LOGIN_ATIVO` ausente ou `0`, não há tela de
-login: todos entram com o perfil `APORTE_PERFIL_SEM_LOGIN` (padrão `admin`) e a gestão de usuários
-fica indisponível. Para reativar, defina `APORTE_LOGIN_ATIVO=1` (Vercel e `.env`) e faça um novo deploy.
+**Login (ativo):** a tela de login do Supabase é o padrão (`APORTE_LOGIN_ATIVO` ausente ou `1`).
+Só com `APORTE_LOGIN_ATIVO=0` (Vercel ou `.env`) o sistema volta ao acesso direto, sem login, com o
+perfil `APORTE_PERFIL_SEM_LOGIN` (padrão `admin`) e sem gestão de usuários: uso emergencial.
 
-**Login (quando ativo):** Supabase Auth (e-mail e senha). O navegador envia o access token (JWT) para a API,
-que valida assinatura, audiência e emissor e busca o perfil na tabela `perfis`. Um usuário
+**Como funciona:** Supabase Auth (e-mail e senha). O navegador envia o access token (JWT) para a API,
+que valida assinatura, audiência e emissor e busca o perfil e os papéis nas tabelas `profiles` e `user_roles`. Um usuário
 desativado perde o acesso na hora e fica bloqueado no Supabase.
 
 A **data-base** no topo substitui o `HOJE()` da planilha.

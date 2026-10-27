@@ -29,9 +29,9 @@ _carregar_env(RAIZ_SISTEMA / ".env")
 # sem DATABASE_URL, usa SQLite local em data/.
 DATABASE_URL = os.environ.get("DATABASE_URL") or str(PASTA_DADOS / "aporte.sqlite3")
 
-# Login (Supabase Auth). Temporariamente INATIVO: todos entram com o perfil
-# PERFIL_SEM_LOGIN. Para reativar a tela de login, defina APORTE_LOGIN_ATIVO=1.
-LOGIN_ATIVO = os.environ.get("APORTE_LOGIN_ATIVO", "0") == "1"
+# Login (Supabase Auth): ATIVO por padrão desde out/2026. Só com APORTE_LOGIN_ATIVO=0 o sistema
+# volta ao acesso direto, sem tela de login, com o perfil PERFIL_SEM_LOGIN (uso emergencial).
+LOGIN_ATIVO = os.environ.get("APORTE_LOGIN_ATIVO", "1") == "1"
 PERFIL_SEM_LOGIN = os.environ.get("APORTE_PERFIL_SEM_LOGIN", "admin")
 PERFIL_SEM_LOGIN = {"adm": "admin"}.get(PERFIL_SEM_LOGIN, PERFIL_SEM_LOGIN)   # nome antigo do papel
 
