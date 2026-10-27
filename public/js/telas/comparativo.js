@@ -2,7 +2,7 @@
 // projetou e os lançamentos da base de custos (Custos SPE e NN's) nas rubricas do setor.
 import { api, carregando, esc, fmt } from '../util.js';
 
-const estado = { mes: null, setor: null };
+const estado = { mes: null, setor: null, versao: 0 };   // versao: descarta resposta de filtro antigo
 
 function tabelaProjetado(d) {
   const linhas = d.projetado.filter((p) => p.valor);
@@ -50,8 +50,11 @@ function caixas(d) {
   </div>`;
 }
 
-/** `topo` é o cabeçalho da aba (com o alternador Grade | Projetado × Incorrido). */
-export async function render(el, { usuario, dataBase, setores, topo }) {
+/** `topo` é o cabeçalho da aba (com o alternador Grade | Projetado × Incorrido);
+ * `aoDesenhar` religa o alternador sempre que o cabeçalho é redesenhado. */
+export async function render(el, opcoes) {
+  const { usuario, dataBase, setores, topo, aoDesenhar } = opcoes;
+  const versao = ++estado.versao;
   estado.mes ??= dataBase.slice(0, 7);
   if (estado.setor === null) estado.setor = setores.some((s) => s.codigo === usuario.perfil) ? usuario.perfil : '';
   el.innerHTML = `<div class="fade">${topo}
@@ -62,18 +65,22 @@ export async function render(el, { usuario, dataBase, setores, topo }) {
         <input type="month" class="campo" id="comp-mes" value="${estado.mes}" style="width:auto;height:32px" /></label>
     </div>
     <div id="comp-conteudo">${carregando(8)}</div></div>`;
+  aoDesenhar?.();
   el.querySelectorAll('#comp-setores [data-setor]').forEach((b) => {
     b.classList.toggle('on', b.dataset.setor === estado.setor);
-    b.onclick = () => { estado.setor = b.dataset.setor; render(el, { usuario, dataBase, setores, topo }); };
+    b.onclick = () => { estado.setor = b.dataset.setor; render(el, opcoes); };
   });
   el.querySelector('#comp-mes').onchange = (e) => {
     if (!e.target.value) return;
     estado.mes = e.target.value;
-    render(el, { usuario, dataBase, setores, topo });
+    render(el, opcoes);
   };
   const [ano, mes] = estado.mes.split('-').map(Number);
   const fim = new Date(ano, mes, 0).toLocaleDateString('sv-SE');
   const d = await api(`/api/projecao/comparativo?mes=${fim}${estado.setor ? `&setor=${encodeURIComponent(estado.setor)}` : ''}`);
-  el.querySelector('#comp-conteudo').innerHTML = `${caixas(d)}
+  const conteudo = el.querySelector('#comp-conteudo');
+  // Outro filtro foi escolhido, ou o usuário voltou para a Grade, antes da resposta chegar.
+  if (versao !== estado.versao || !conteudo) return;
+  conteudo.innerHTML = `${caixas(d)}
     <div class="comparativo">${tabelaProjetado(d)}${tabelaIncorrido(d)}</div>`;
 }

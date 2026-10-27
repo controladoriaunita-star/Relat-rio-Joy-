@@ -219,15 +219,17 @@ export async function render(el, ctx) {
   estado.dados = await api(`/api/projecao?data=${dataBase}`);
   estado.alteracoes.clear();
   const d = estado.dados;
+  // Religado a cada desenho da tela: o Projetado × Incorrido redesenha o cabeçalho (e o
+  // alternador) quando muda setor ou mês. Ao trocar de visão, volta ao topo da página.
   const ligarAlternador = () => el.querySelectorAll('[data-visao]').forEach((b) => (b.onclick = () => {
     if (b.dataset.visao === estado.visao || !sair()) return;
     estado.visao = b.dataset.visao;
+    window.scrollTo(0, 0);
     render(el, ctx);
   }));
   if (estado.visao === 'comparativo') {
-    const carga = comparativo.render(el, { usuario, dataBase, setores: d.setores, topo: topo(d, usuario) });
-    ligarAlternador();
-    return carga;
+    return comparativo.render(el, { usuario, dataBase, setores: d.setores, topo: topo(d, usuario),
+                                    aoDesenhar: ligarAlternador });
   }
   estado.ano ??= d.mes_atual.slice(0, 4);
   if (estado.setor === null) estado.setor = d.setores.some((s) => s.codigo === usuario.perfil) ? usuario.perfil : '';
