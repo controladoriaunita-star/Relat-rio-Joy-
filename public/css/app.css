@@ -426,11 +426,59 @@ main { padding: 24px var(--gutter) 96px; }
   .empilhada-barra { grid-column: 1 / -1; grid-row: 2; }
   .barra-salvar { width: calc(100% - 32px); justify-content: space-between; }
 }
-@page { size: A4 landscape; margin: 8mm; }
+/* ---------------------------------------------------------------- Impressão / PDF (botão Imprimir do Resumo)
+   Só vale no papel: a tela não muda. A4 paisagem, uma página: tabela à esquerda e Relatório de
+   Aporte à direita, sem o menu do app, com as cores dos destaques e numeração de páginas. */
+@page {
+  size: A4 landscape; margin: 9mm 9mm 11mm;
+  @bottom-left { content: "Relatório de Aporte · Joy+ Evans"; font: 7.5px Inter, sans-serif; color: #8a8797; }
+  @bottom-right { content: "Página " counter(page) " de " counter(pages); font: 7.5px Inter, sans-serif; color: #8a8797; }
+}
 @media print {
-  header.app { position: static; }
-  .barra-salvar, .toasts, .sem-impressao { display: none !important; }
-  .sheet, .tabela-resumo { overflow: visible; max-height: none; }
-  .resumo-planilha { grid-template-columns: minmax(0, 1fr) 250px; }
-  .tabela-resumo tr, .bloco-aporte { break-inside: avoid; }
+  html, body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  header.app, .faixa-local, .barra-salvar, .toasts, .sem-impressao, .dica { display: none !important; }
+  main { padding: 0 !important; max-width: none; }
+  .fade { animation: none !important; }
+  .card { box-shadow: none !important; }
+
+  /* Cabeçalho do relatório: título à esquerda, logo à direita, filete na cor da marca. */
+  .cabecalho { display: block; margin: 0 0 8px; padding: 0 0 6px 0; border-bottom: 1.5px solid var(--color-primary);
+    background: url('/assets/logo-joy.png') no-repeat right 2px / auto 26px; }
+  .cabecalho .eyebrow { font-size: 8px; }
+  .cabecalho h2 { font-size: 16px; margin: 1px 0 0; }
+  .cabecalho p { font-size: 9px; margin-top: 2px; }
+
+  /* Layout em duas colunas também no papel (anula o empilhamento de telas estreitas). */
+  .resumo-planilha { display: grid; grid-template-columns: minmax(0, 1fr) 262px; gap: 10px; }
+  .relatorio-aporte { order: 0; display: flex; flex-direction: column; gap: 6px; }
+
+  /* Tabela de rubricas compacta, com cabeçalho repetido se quebrar de página. */
+  .sheet, .tabela-resumo { overflow: visible !important; max-height: none !important; border-radius: 4px; }
+  .tabela-resumo table { font-size: 8.4px; }
+  .tabela-resumo th, .tabela-resumo td { padding: 1.6px 4px; line-height: 1.25; }
+  .tabela-resumo thead { display: table-header-group; }
+  .tabela-resumo thead th { position: static; font-size: 7.6px; padding-top: 4px; padding-bottom: 4px; }
+  .tabela-resumo thead th small { font-size: 7px; }
+  .tabela-resumo tr.total td, .tabela-resumo tr.grande td { font-size: 8.4px; }
+  .tabela-resumo .first { position: static; }
+  .tabela-resumo tr { break-inside: avoid; }
+  .sheet tbody tr:hover td { background: inherit; }
+
+  /* Blocos do Relatório de Aporte. */
+  .bloco-aporte { padding: 6px 9px; gap: 3px; border-radius: 6px; break-inside: avoid; }
+  .bloco-aporte .sub { font-size: 7.6px; }
+  .bloco-aporte .par { font-size: 8.2px; padding: 1.4px 0; line-height: 1.25; gap: 6px; }
+  .bloco-aporte .nota { font-size: 7.2px; line-height: 1.3; }
+  .bloco-aporte .numero-heroi { font-size: 17px; line-height: 1.15; }
+  .bloco-aporte .numero-heroi.menor { font-size: 14px; }
+  .divisao-aporte { gap: 4px; }
+  .divisao-aporte div { padding: 2px 6px; }
+  .divisao-aporte span { font-size: 7px; }
+  .divisao-aporte b { font-size: 9.5px; }
+  .parcelas { gap: 3px; }
+  .parcela { padding: 3px 7px; gap: 1px; }
+  .parcela-topo { font-size: 8px; }
+  .parcela-valor b { font-size: 10px; }
+  .parcela-valor span, .parcela .par.sub-par { font-size: 7.2px; }
+  .badge { font-size: 7px; padding: 1px 5px; }
 }
