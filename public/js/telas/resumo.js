@@ -279,7 +279,7 @@ export async function render(el, { usuario, dataBase, recarregar }) {
     <div class="resumo-planilha">
       <div class="resumo-tabela">${tabela(d)}</div>
       <aside class="relatorio-aporte" aria-label="Relatório de Aporte">
-        ${blocoAporteMes(d)}${blocoCronograma(d, usuario.permissoes['premissas.editar'])}${blocoConta(d)}${blocoProximo(d)}
+        ${blocoAporteMes(d)}${blocoCronograma(d, usuario.permissoes['premissas.editar'])}${blocoConta(d)}
       </aside>
     </div>
   </div>`;
