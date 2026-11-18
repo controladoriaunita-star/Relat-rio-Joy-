@@ -105,14 +105,15 @@ def normalizar(codigo: str, linhas: list[dict], depara: dict[str, str]) -> Resul
             registro = Movimento(classificacao, data, eomonth(data), como_numero(linha["Valor_es"]),
                                  _texto(linha.get("HistLanc_es")))
         elif codigo == "transferencias":
+            data = como_data(linha["Data_tb"])
             registro = Transferencia(_inteiro(linha["Empresa_tb"]), _inteiro(linha["EmpresaCred_tb"]),
-                                     eomonth(como_data(linha["Data_tb"])), como_numero(linha["Valor_tb"]))
+                                     eomonth(data), como_numero(linha["Valor_tb"]), data)
         elif codigo == "saldos":
             registro = SaldoConta(_inteiro(linha["Empresa"]), _texto(linha["Conta"]),
                                   como_data(linha["Data"]), como_numero(linha["Saldo"]))
         else:
-            registro = Recebimento(_inteiro(linha["CódigoCliente"]),
-                                   eomonth(como_data(linha["Data_Recebimento"])),
-                                   como_numero(linha["Valor_Líquido"]))
+            data = como_data(linha["Data_Recebimento"])
+            registro = Recebimento(_inteiro(linha["CódigoCliente"]), eomonth(data),
+                                   como_numero(linha["Valor_Líquido"]), data)
         resultado.registros.append(registro)
     return resultado

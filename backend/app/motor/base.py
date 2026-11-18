@@ -41,6 +41,7 @@ class Transferencia:         # bd_transferênciaBancária
     empresa_credito: int | None
     fim_mes: date
     valor: float
+    data: date | None = None     # só para consulta (aba Aportes); o cálculo usa fim_mes
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class Recebimento:           # Recebidas
     cliente: int | None
     fim_mes: date
     valor: float
+    data: date | None = None     # só para consulta (aba Aportes); o cálculo usa fim_mes
 
 
 @dataclass(frozen=True)

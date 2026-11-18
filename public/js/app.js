@@ -2,6 +2,7 @@
 import { api, erroToast, esc, modal, toast } from './util.js';
 import * as sessao from './sessao.js';
 import * as resumo from './telas/resumo.js';
+import * as aportes from './telas/aportes.js';
 import * as dashboards from './telas/dashboards.js';
 import * as painel from './telas/painel.js';
 import * as projecao from './telas/projecao.js';
@@ -9,6 +10,7 @@ import * as apis from './telas/apis.js';
 
 const ABAS = [
   { id: 'resumo', titulo: 'Resumo', tela: resumo, permissao: 'resumo.ver' },
+  { id: 'aportes', titulo: 'Aportes', tela: aportes, permissao: 'resumo.ver' },
   { id: 'dashboards', titulo: 'Dashboards', tela: dashboards, permissao: 'dashboards.ver' },
   { id: 'painel', titulo: 'Painel', tela: painel, permissao: 'painel.ver' },
   { id: 'projecao', titulo: 'Projeção', tela: projecao, permissao: 'projecao.ver' },

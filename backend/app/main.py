@@ -159,6 +159,10 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
     def dashboards(hoje: date = Depends(data_base), _: dict = Depends(exigir("dashboards.ver"))):
         return servico.dashboards(hoje)
 
+    @app.get("/api/aportes")
+    def aportes(hoje: date = Depends(data_base), _: dict = Depends(exigir("resumo.ver"))):
+        return servico.aportes(hoje)
+
     @app.get("/api/painel")
     def painel(hoje: date = Depends(data_base), _: dict = Depends(exigir("painel.ver"))):
         resultado = servico.calcular("painel", hoje)

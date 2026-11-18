@@ -21,6 +21,7 @@ from .fontes.definicoes import FONTES, FONTES_POR_CODIGO
 from .fontes.graph import ClienteGraph, ErroGraph
 from .fontes.montagem import montar_base
 from .fontes.normalizacao import montar_depara, normalizar, tabela_para_dicts
+from .motor.aportes import aportes_ate
 from .motor.base import Base, LinhaProjecao
 from .motor import dashboards as painel_dashboards
 from .motor.painel import calcular_painel
@@ -545,6 +546,11 @@ class Servico:
                 "setores": painel_dashboards.gasto_por_setor(base, self.setores(), projecoes),
                 "custos": painel_dashboards.custos_por_rubrica(resumo),
                 "ultima_atualizacao": resumo["ultima_atualizacao"]}
+
+    def aportes(self, hoje: date) -> dict:
+        """Aportes feitos até a data-base (ver motor/aportes.py)."""
+        base, _ = self.base()
+        return {**aportes_ate(base, hoje), "ultima_atualizacao": base.ultima_atualizacao}
 
     def salvar_projecao(self, itens: list[dict], usuario: dict, hoje: date) -> int:
         mes_atual = eomonth(hoje)
