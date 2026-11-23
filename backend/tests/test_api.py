@@ -13,12 +13,13 @@ from fastapi.testclient import TestClient
 
 from backend.app import auth
 from backend.app.catalogo import PERMISSOES
-from backend.app.config import ARQUIVO_EXCEL
+from backend.app.obras import OBRAS_PADRAO
 from backend.app.db import Banco
 from backend.app.fontes.graph import ErroGraph
 from backend.app.main import criar_app
 from backend.app.servicos import Servico
 
+ARQUIVO_EXCEL = OBRAS_PADRAO[0].caminho_excel          # Evans
 pytestmark = pytest.mark.skipif(not ARQUIVO_EXCEL.exists(), reason="planilha de referência ausente")
 HOJE = "2026-10-16"
 USUARIOS = {"ana.mkt": "mkt", "caio.proj": "proj", "dora.dir": "diretor", "edu.adm": "admin"}
@@ -31,7 +32,7 @@ class GraphFalso:
     def configurado():
         return True
 
-    def ler_aba(self, aba):
+    def ler_aba(self, item, aba):
         raise ErroGraph("Acesso negado pelo SharePoint.")
 
 
@@ -40,7 +41,7 @@ def ambiente(tmp_path_factory):
     banco = Banco(tmp_path_factory.mktemp("dados") / "teste.sqlite3")
     servico = Servico(banco, graph=GraphFalso(), admin=auth.AdminLocal())
     servico.inicializar()
-    relatorio = servico.migrar_do_excel()
+    relatorio = servico.obra("evans").migrar_do_excel()
     ids = {login: servico.criar_usuario(f"{login}@joy.test", login, perfil, None, None)
            for login, perfil in USUARIOS.items()}
     # O verificador local troca o JWT do Supabase nos testes ("local:<usuario_id>").
@@ -58,12 +59,13 @@ def cliente(ambiente, login: str | None = None) -> TestClient:
 
 
 def linha_id(ambiente, nome: str) -> int:
-    return ambiente["servico"].banco.um("SELECT id FROM linhas_projecao WHERE nome = ?", nome)["id"]
+    return ambiente["servico"].banco.um("SELECT l.id FROM linhas_projecao l JOIN setores s ON s.id = l.setor_id "
+                                        "WHERE s.obra = 'evans' AND l.nome = ?", nome)["id"]
 
 
 # ------------------------------------------------------------------------ sessão
 def test_sem_token_bloqueia(ambiente):
-    assert cliente(ambiente).get("/api/resumo").status_code == 401
+    assert cliente(ambiente).get("/api/obras/evans/resumo").status_code == 401
 
 
 def test_token_de_usuario_sem_perfil(ambiente):
@@ -80,18 +82,18 @@ def test_setor_ve_somente_a_projecao(ambiente):
     c = cliente(ambiente, "ana.mkt")
     eu = c.get("/api/eu").json()["permissoes"]
     assert eu["projecao.ver"] and not (eu["resumo.ver"] or eu["dashboards.ver"] or eu["painel.ver"] or eu["apis.ver"])
-    for rota in ("/api/resumo", "/api/painel", "/api/parametros", "/api/fontes"):
+    for rota in ("/api/obras/evans/resumo", "/api/obras/evans/painel", "/api/obras/evans/parametros", "/api/obras/evans/fontes"):
         assert c.get(f"{rota}?data={HOJE}").status_code == 403, rota
-    assert c.get(f"/api/projecao?data={HOJE}").status_code == 200
+    assert c.get(f"/api/obras/evans/projecao?data={HOJE}").status_code == 200
     for login in ("dora.dir", "edu.adm"):
-        assert cliente(ambiente, login).get(f"/api/resumo?data={HOJE}").status_code == 200
+        assert cliente(ambiente, login).get(f"/api/obras/evans/resumo?data={HOJE}").status_code == 200
 
 
 def test_papeis_e_permissoes_padrao(ambiente):
     matriz = cliente(ambiente, "edu.adm").get("/api/permissoes").json()
     papeis = {p["key"]: set(p["permissoes"]) for p in matriz["papeis"]}
     assert papeis["admin"] == set(PERMISSOES)
-    assert papeis["diretor"] == set(PERMISSOES) - {"setores.gerenciar", "usuarios.gerenciar"}
+    assert papeis["diretor"] == set(PERMISSOES) - {"setores.gerenciar", "usuarios.gerenciar", "obras.gerenciar"}
     assert papeis["mkt"] == papeis["proj"] == papeis["inc"] == {"projecao.ver"}
     assert cliente(ambiente, "dora.dir").get("/api/permissoes").status_code == 403
 
@@ -102,11 +104,11 @@ def test_conceder_permissao_a_um_setor(ambiente):
                                                                "concedida": valor})
     try:
         assert conceder(True).status_code == 200
-        assert cliente(ambiente, "caio.proj").get(f"/api/painel?data={HOJE}").status_code == 200
-        assert cliente(ambiente, "ana.mkt").get(f"/api/painel?data={HOJE}").status_code == 403
+        assert cliente(ambiente, "caio.proj").get(f"/api/obras/evans/painel?data={HOJE}").status_code == 200
+        assert cliente(ambiente, "ana.mkt").get(f"/api/obras/evans/painel?data={HOJE}").status_code == 403
     finally:
         assert conceder(False).status_code == 200
-    assert cliente(ambiente, "caio.proj").get(f"/api/painel?data={HOJE}").status_code == 403
+    assert cliente(ambiente, "caio.proj").get(f"/api/obras/evans/painel?data={HOJE}").status_code == 403
     assert adm.put("/api/permissoes", json={"papel": "admin", "permissao": "resumo.ver",
                                             "concedida": False}).status_code == 422
 
@@ -129,7 +131,7 @@ def test_config_publica_nao_exige_login(ambiente):
 # ------------------------------------------------------------------------ cálculo
 def test_resumo_realizado_igual_planilha(ambiente):
     """Colunas que vêm das fontes (não da projeção) batem com o Excel via API."""
-    resumo = cliente(ambiente, "dora.dir").get(f"/api/resumo?data={HOJE}").json()
+    resumo = cliente(ambiente, "dora.dir").get(f"/api/obras/evans/resumo?data={HOJE}").json()
     excel = ambiente["excel"]["Resumo"]
     for linha in resumo["linhas"]:
         r = linha["linha_excel"]
@@ -145,7 +147,7 @@ def test_resumo_realizado_igual_planilha(ambiente):
 
 
 def test_painel_serializa(ambiente):
-    painel = cliente(ambiente, "dora.dir").get(f"/api/painel?data={HOJE}").json()
+    painel = cliente(ambiente, "dora.dir").get(f"/api/obras/evans/painel?data={HOJE}").json()
     assert len(painel["meses"]) == 84
     assert set(painel["conciliacao"]) == {"mes", "saldo_painel", "saldo_banco", "diferenca"}
     terreno = next(l for l in painel["linhas"] if l["linha_excel"] == 43)
@@ -163,10 +165,10 @@ def test_migracao_projecao_sem_duplicidade(ambiente):
 
 def test_setor_edita_somente_suas_linhas(ambiente):
     c = cliente(ambiente, "ana.mkt")
-    ok = c.put(f"/api/projecao?data={HOJE}",
+    ok = c.put(f"/api/obras/evans/projecao?data={HOJE}",
                json=[{"linha_id": linha_id(ambiente, "Marketing"), "mes": "2027-03-31", "valor": 1234.5}])
     assert ok.status_code == 200
-    negado = c.put(f"/api/projecao?data={HOJE}",
+    negado = c.put(f"/api/obras/evans/projecao?data={HOJE}",
                    json=[{"linha_id": linha_id(ambiente, "ARQUITETURA | RSA"), "mes": "2027-03-31",
                           "valor": 10}])
     assert negado.status_code == 422 and "permissão" in negado.json()["detail"]
@@ -174,56 +176,56 @@ def test_setor_edita_somente_suas_linhas(ambiente):
 
 def test_mes_passado_bloqueado_para_setor(ambiente):
     item = [{"linha_id": linha_id(ambiente, "Marketing"), "mes": "2026-09-30", "valor": 5}]
-    assert cliente(ambiente, "ana.mkt").put(f"/api/projecao?data={HOJE}", json=item).status_code == 422
-    assert cliente(ambiente, "dora.dir").put(f"/api/projecao?data={HOJE}", json=item).status_code == 200
+    assert cliente(ambiente, "ana.mkt").put(f"/api/obras/evans/projecao?data={HOJE}", json=item).status_code == 422
+    assert cliente(ambiente, "dora.dir").put(f"/api/obras/evans/projecao?data={HOJE}", json=item).status_code == 200
     item[0]["valor"] = 0      # zerar remove a projeção
-    assert cliente(ambiente, "dora.dir").put(f"/api/projecao?data={HOJE}", json=item).status_code == 200
+    assert cliente(ambiente, "dora.dir").put(f"/api/obras/evans/projecao?data={HOJE}", json=item).status_code == 200
 
 
 def test_mes_invalido(ambiente):
     item = [{"linha_id": linha_id(ambiente, "Marketing"), "mes": "2027-03-15", "valor": 5}]
-    assert cliente(ambiente, "ana.mkt").put(f"/api/projecao?data={HOJE}", json=item).status_code == 422
+    assert cliente(ambiente, "ana.mkt").put(f"/api/obras/evans/projecao?data={HOJE}", json=item).status_code == 422
 
 
 def test_projecao_alimenta_resumo_e_painel(ambiente):
     c, leitor = cliente(ambiente, "caio.proj"), cliente(ambiente, "dora.dir")
     rubrica = "Projetos"
-    antes_r = next(l for l in leitor.get(f"/api/resumo?data={HOJE}").json()["linhas"] if l["rubrica"] == rubrica)
-    antes_p = next(l for l in leitor.get(f"/api/painel?data={HOJE}").json()["linhas"] if l["rotulo"] == rubrica)
-    c.put(f"/api/projecao?data={HOJE}",
+    antes_r = next(l for l in leitor.get(f"/api/obras/evans/resumo?data={HOJE}").json()["linhas"] if l["rubrica"] == rubrica)
+    antes_p = next(l for l in leitor.get(f"/api/obras/evans/painel?data={HOJE}").json()["linhas"] if l["rotulo"] == rubrica)
+    c.put(f"/api/obras/evans/projecao?data={HOJE}",
           json=[{"linha_id": linha_id(ambiente, "LAUDOS | C23"), "mes": "2026-11-30", "valor": 1000},
                 {"linha_id": linha_id(ambiente, "LAUDOS | C23"), "mes": "2026-10-31", "valor": 250}])
-    depois_r = next(l for l in leitor.get(f"/api/resumo?data={HOJE}").json()["linhas"] if l["rubrica"] == rubrica)
-    depois_p = next(l for l in leitor.get(f"/api/painel?data={HOJE}").json()["linhas"] if l["rotulo"] == rubrica)
+    depois_r = next(l for l in leitor.get(f"/api/obras/evans/resumo?data={HOJE}").json()["linhas"] if l["rubrica"] == rubrica)
+    depois_p = next(l for l in leitor.get(f"/api/obras/evans/painel?data={HOJE}").json()["linhas"] if l["rotulo"] == rubrica)
     assert math.isclose(depois_r["projetado_proximo"] - antes_r["projetado_proximo"], 1000)
     assert math.isclose(depois_r["projetado_mes"] - antes_r["projetado_mes"], 250)
     assert math.isclose(depois_p["P"] - antes_p["P"], -1250)          # Painel P = -Projetado Total
-    grade = c.get(f"/api/projecao?data={HOJE}").json()
+    grade = c.get(f"/api/obras/evans/projecao?data={HOJE}").json()
     projetos = next(s for s in grade["setores"] if s["codigo"] == "proj")
     assert projetos["editavel"] and not next(s for s in grade["setores"] if s["codigo"] == "mkt")["editavel"]
 
 
 def test_novo_setor_cria_perfil(ambiente):
     adm = cliente(ambiente, "edu.adm")
-    setor = adm.post("/api/setores", json={"codigo": "jur", "nome": "Jurídico"}).json()["id"]
-    linha = adm.post("/api/linhas", json={"setor_id": setor, "nome": "Honorários",
+    setor = adm.post("/api/obras/evans/setores", json={"codigo": "jur", "nome": "Jurídico"}).json()["id"]
+    linha = adm.post("/api/obras/evans/linhas", json={"setor_id": setor, "nome": "Honorários",
                                           "rubrica": "Despesas de Incorporação"}).json()["id"]
     criado = adm.post("/api/usuarios", json={"email": "gil.jur@joy.test", "nome": "Gil", "perfil": "jur"})
     assert criado.status_code == 200
     gil = cliente(ambiente, criado.json()["id"])
-    r = gil.put(f"/api/projecao?data={HOJE}", json=[{"linha_id": linha, "mes": "2027-01-31", "valor": 99}])
+    r = gil.put(f"/api/obras/evans/projecao?data={HOJE}", json=[{"linha_id": linha, "mes": "2027-01-31", "valor": 99}])
     assert r.status_code == 200
-    assert adm.post("/api/setores", json={"codigo": "admin", "nome": "x"}).status_code == 422
+    assert adm.post("/api/obras/evans/setores", json={"codigo": "admin", "nome": "x"}).status_code == 422
 
 
 def test_setor_nao_administra(ambiente):
-    assert cliente(ambiente, "ana.mkt").post("/api/setores", json={"codigo": "x", "nome": "x"}).status_code == 403
+    assert cliente(ambiente, "ana.mkt").post("/api/obras/evans/setores", json={"codigo": "x", "nome": "x"}).status_code == 403
 
 
 # ------------------------------------------------------------------------ fontes
 def test_aba_apis_restrita(ambiente):
-    assert cliente(ambiente, "ana.mkt").get("/api/fontes").status_code == 403
-    status = cliente(ambiente, "edu.adm").get("/api/fontes").json()
+    assert cliente(ambiente, "ana.mkt").get("/api/obras/evans/fontes").status_code == 403
+    status = cliente(ambiente, "edu.adm").get("/api/obras/evans/fontes").json()
     assert {f["codigo"] for f in status["fontes"]} == {"custos_spe", "custos_nn", "saidas", "entradas",
                                                        "transferencias", "recebidas", "saldos"}
     assert all(f["ultima_ok"] and f["pendentes"] == 0 for f in status["fontes"])
@@ -231,17 +233,17 @@ def test_aba_apis_restrita(ambiente):
 
 def test_falha_do_graph_preserva_ultima_carga(ambiente):
     adm = cliente(ambiente, "edu.adm")
-    antes = adm.get(f"/api/resumo?data={HOJE}").json()["total"]
-    relatorio = adm.post("/api/fontes/atualizar", json={"origem": "graph"}).json()
+    antes = adm.get(f"/api/obras/evans/resumo?data={HOJE}").json()["total"]
+    relatorio = adm.post("/api/obras/evans/fontes/atualizar", json={"origem": "graph"}).json()
     assert all(r["status"] == "erro" and "Acesso negado" in r["mensagem"] for r in relatorio)
-    assert adm.get(f"/api/resumo?data={HOJE}").json()["total"] == antes
-    fontes = adm.get("/api/fontes").json()["fontes"]
+    assert adm.get(f"/api/obras/evans/resumo?data={HOJE}").json()["total"] == antes
+    fontes = adm.get("/api/obras/evans/fontes").json()["fontes"]
     assert all(f["ultima"]["status"] == "erro" and f["ultima_ok"] for f in fontes)
 
 
 def test_pendencia_de_classificacao(ambiente):
     servico = ambiente["servico"]
-    carga = servico.banco.um("SELECT id, dados FROM cargas WHERE fonte = 'saidas' AND status = 'ok' "
+    carga = servico.banco.um("SELECT id, dados FROM cargas WHERE obra = 'evans' AND fonte = 'saidas' AND status = 'ok' "
                              "ORDER BY id DESC LIMIT 1")
     valores = json.loads(carga["dados"])
     cab = valores[0]
@@ -252,14 +254,14 @@ def test_pendencia_de_classificacao(ambiente):
         con.execute("UPDATE cargas SET dados = ? WHERE id = ?", (json.dumps(valores + [nova]), carga["id"]))
 
     adm = cliente(ambiente, "edu.adm")
-    pendentes = adm.get("/api/fontes/saidas/pendentes").json()
+    pendentes = adm.get("/api/obras/evans/fontes/saidas/pendentes").json()
     assert [p["concat"] for p in pendentes] == ["73 - 999"]
-    antes = next(l for l in adm.get(f"/api/resumo?data={HOJE}").json()["linhas"]
+    antes = next(l for l in adm.get(f"/api/obras/evans/resumo?data={HOJE}").json()["linhas"]
                  if l["rubrica"] == "Despesas Adm. da SPE")
-    assert adm.post("/api/fontes/saidas/classificar",
+    assert adm.post("/api/obras/evans/fontes/saidas/classificar",
                     json={"concat": "73 - 999", "classificacao": "Despesas Adm. da SPE"}).status_code == 200
-    assert adm.get("/api/fontes/saidas/pendentes").json() == []
-    depois = next(l for l in adm.get(f"/api/resumo?data={HOJE}").json()["linhas"]
+    assert adm.get("/api/obras/evans/fontes/saidas/pendentes").json() == []
+    depois = next(l for l in adm.get(f"/api/obras/evans/resumo?data={HOJE}").json()["linhas"]
                   if l["rubrica"] == "Despesas Adm. da SPE")
     # Controle Saídas entram pelo mês da data: uma saída em 05/10 é "pago no mês" de outubro.
     assert math.isclose(depois["pago_mes"] - antes["pago_mes"], 321)
@@ -270,13 +272,13 @@ def test_pendencia_de_classificacao(ambiente):
 def test_saldos_vem_da_fonte_e_alimentam_o_resumo(ambiente):
     """Saldo do mês anterior (Z5) = soma, por conta, do último saldo do mês na aba Saldo."""
     adm = cliente(ambiente, "edu.adm")
-    resumo = adm.get(f"/api/resumo?data={HOJE}").json()
-    saldos = adm.get("/api/saldos").json()
+    resumo = adm.get(f"/api/obras/evans/resumo?data={HOJE}").json()
+    saldos = adm.get("/api/obras/evans/saldos").json()
     fim = [x for x in saldos if x["fim_de_mes"] and x["data"][:7] == resumo["datas"]["mes_analise"][:7]]
     assert fim and math.isclose(sum(x["saldo"] for x in fim), resumo["aporte_mes"]["saldo_anterior"])
     assert len({x["conta"] for x in fim}) == len(fim)                 # um saldo por conta
     servico = ambiente["servico"]
-    carga = servico.banco.um("SELECT id, dados FROM cargas WHERE fonte = 'saldos' AND status = 'ok' ORDER BY id DESC LIMIT 1")
+    carga = servico.banco.um("SELECT id, dados FROM cargas WHERE obra = 'evans' AND fonte = 'saldos' AND status = 'ok' ORDER BY id DESC LIMIT 1")
     valores = json.loads(carga["dados"])
     cab = valores[0]
     nova = [None] * len(cab)
@@ -284,31 +286,31 @@ def test_saldos_vem_da_fonte_e_alimentam_o_resumo(ambiente):
         nova[cab.index(coluna)] = valor
     with servico.banco.transacao() as con:
         con.execute("UPDATE cargas SET dados = ? WHERE id = ?", (json.dumps(valores + [nova]), carga["id"]))
-    depois = adm.get(f"/api/resumo?data={HOJE}").json()["aporte_mes"]["saldo_anterior"]
+    depois = adm.get(f"/api/obras/evans/resumo?data={HOJE}").json()["aporte_mes"]["saldo_anterior"]
     assert math.isclose(depois - resumo["aporte_mes"]["saldo_anterior"], 1000)
     with servico.banco.transacao() as con:
         con.execute("UPDATE cargas SET dados = ? WHERE id = ?", (carga["dados"], carga["id"]))
-    assert cliente(ambiente, "ana.mkt").get("/api/saldos").status_code == 403
+    assert cliente(ambiente, "ana.mkt").get("/api/obras/evans/saldos").status_code == 403
 
 
 def test_premissas(ambiente):
     dir_ = cliente(ambiente, "dora.dir")
-    r = dir_.put("/api/parametros/premissas", json={"caixa_minimo": 150000})
+    r = dir_.put("/api/obras/evans/parametros/premissas", json={"caixa_minimo": 150000})
     assert r.status_code == 200 and r.json()["caixa_minimo"] == 150000
-    assert dir_.get(f"/api/resumo?data={HOJE}").json()["aporte_mes"]["caixa_minimo"] == 150000
-    assert dir_.put("/api/parametros/premissas", json={"inexistente": 1}).status_code == 422
-    assert cliente(ambiente, "ana.mkt").put("/api/parametros/premissas", json={}).status_code == 403
-    dir_.put("/api/parametros/premissas", json={"caixa_minimo": 100000})
+    assert dir_.get(f"/api/obras/evans/resumo?data={HOJE}").json()["aporte_mes"]["caixa_minimo"] == 150000
+    assert dir_.put("/api/obras/evans/parametros/premissas", json={"inexistente": 1}).status_code == 422
+    assert cliente(ambiente, "ana.mkt").put("/api/obras/evans/parametros/premissas", json={}).status_code == 403
+    dir_.put("/api/obras/evans/parametros/premissas", json={"caixa_minimo": 100000})
 
 
 def test_historico_registra_acoes(ambiente):
-    acoes = {h["acao"] for h in cliente(ambiente, "edu.adm").get("/api/historico").json()}
+    acoes = {h["acao"] for h in cliente(ambiente, "edu.adm").get("/api/obras/evans/historico").json()}
     assert {"projecao.salvar", "depara.classificar", "fonte.atualizar"} <= acoes
 
 
 def test_custo_proximo_mes_automatico(ambiente):
     """Z22 deixa de ser digitado: é o projetado + contas a pagar do próximo mês (coluna S)."""
-    resumo = cliente(ambiente, "dora.dir").get(f"/api/resumo?data={HOJE}").json()
+    resumo = cliente(ambiente, "dora.dir").get(f"/api/obras/evans/resumo?data={HOJE}").json()
     proximo = resumo["aporte_proximo"]
     assert proximo["custo_automatico"] is True
     assert math.isclose(proximo["custo_projetado"], resumo["total"]["projetado_proximo"])
@@ -333,34 +335,34 @@ def test_sem_login_acesso_direto_com_perfil_fixo(ambiente):
     eu = c.get("/api/eu").json()
     assert eu["nome"] == "Acesso livre" and eu["perfil"] == "admin" and eu["login_ativo"] is False
     assert eu["permissoes"]["gerir_usuarios"] is False
-    assert c.get(f"/api/resumo?data={HOJE}").status_code == 200
+    assert c.get(f"/api/obras/evans/resumo?data={HOJE}").status_code == 200
     assert c.get("/api/usuarios").status_code == 409          # gestão de usuários indisponível
     assert c.post("/api/usuarios", json={"email": "a@b.c", "nome": "A", "perfil": "mkt"}).status_code == 409
 
 
 def test_respostas_da_api_nao_ficam_em_cache(ambiente):
-    resposta = cliente(ambiente, "dora.dir").get(f"/api/resumo?data={HOJE}")
+    resposta = cliente(ambiente, "dora.dir").get(f"/api/obras/evans/resumo?data={HOJE}")
     assert resposta.headers["Cache-Control"] == "no-store"
 
 
 def test_comparativo_projetado_incorrido(ambiente):
     c = cliente(ambiente, "ana.mkt")          # setor consulta qualquer setor (só leitura)
-    d = c.get(f"/api/projecao/comparativo?mes=2026-09-30&setor=proj").json()
+    d = c.get(f"/api/obras/evans/projecao/comparativo?mes=2026-09-30&setor=proj").json()
     rubricas = {p["rubrica"] for p in d["projetado"]}
     assert rubricas == {"Projetos"} and all(i["rubrica"] in rubricas for i in d["incorrido"])
     assert all(i["data"].startswith("2026-09") for i in d["incorrido"])
     assert math.isclose(d["totais"]["incorrido"], sum(i["valor"] for i in d["incorrido"]))
     assert math.isclose(d["totais"]["projetado"], sum(p["valor"] for p in d["projetado"]))
     assert math.isclose(d["totais"]["pago"] + d["totais"]["a_pagar"], d["totais"]["incorrido"])
-    todos = c.get("/api/projecao/comparativo?mes=2026-09-30").json()
+    todos = c.get("/api/obras/evans/projecao/comparativo?mes=2026-09-30").json()
     assert len(todos["projetado"]) > len(d["projetado"])
-    assert c.get("/api/projecao/comparativo?mes=2026-09-30&setor=xyz").status_code == 422
+    assert c.get("/api/obras/evans/projecao/comparativo?mes=2026-09-30&setor=xyz").status_code == 422
 
 
 def test_dashboards_coerentes_com_resumo_e_projecao(ambiente):
     dir_ = cliente(ambiente, "dora.dir")
-    d = dir_.get(f"/api/dashboards?data={HOJE}").json()
-    resumo = dir_.get(f"/api/resumo?data={HOJE}").json()
+    d = dir_.get(f"/api/obras/evans/dashboards?data={HOJE}").json()
+    resumo = dir_.get(f"/api/obras/evans/resumo?data={HOJE}").json()
     serie = d["exposicao"]["serie"]
     acumulado = 0
     for ponto in serie:                                    # acumulado = soma corrida do mensal
@@ -372,19 +374,19 @@ def test_dashboards_coerentes_com_resumo_e_projecao(ambiente):
     # Recebidas do mês = receitas do Resumo; transferências da holding batem com a conta da SPE.
     assert math.isclose(mes["investidor"] + mes["receitas"], resumo["aporte_mes"]["receita_mes"])
     assert math.isclose(mes["holding"], resumo["conta"]["transferencias_holding"])
-    comparativo = dir_.get(f"/api/projecao/comparativo?mes={resumo['datas']['mes_atual']}").json()
+    comparativo = dir_.get(f"/api/obras/evans/projecao/comparativo?mes={resumo['datas']['mes_atual']}").json()
     no_mes = [v for valores in d["setores"]["valores"].values() for v in valores if v["mes"] == resumo["datas"]["mes_atual"]]
     assert math.isclose(sum(v["incorrido"] for v in no_mes), comparativo["totais"]["incorrido"])
     assert math.isclose(sum(v["projetado"] for v in no_mes), comparativo["totais"]["projetado"])
-    assert cliente(ambiente, "ana.mkt").get(f"/api/dashboards?data={HOJE}").status_code == 403
+    assert cliente(ambiente, "ana.mkt").get(f"/api/obras/evans/dashboards?data={HOJE}").status_code == 403
 
 
 def test_salvar_cronograma_do_aporte(ambiente):
     dir_ = cliente(ambiente, "dora.dir")
-    url = "/api/parametros/cronograma"
+    url = "/api/obras/evans/parametros/cronograma"
     parcelas = [{"data": "2026-10-20", "percentual": 40}, {"data": "2026-10-05", "percentual": 60}]
     assert dir_.put(url, json={"mes": "2026-10-31", "parcelas": parcelas}).status_code == 200
-    c = dir_.get(f"/api/resumo?data={HOJE}").json()["cronograma_aporte"]
+    c = dir_.get(f"/api/obras/evans/resumo?data={HOJE}").json()["cronograma_aporte"]
     assert [p["data"] for p in c["parcelas"]] == ["2026-10-05", "2026-10-20"]          # ordenadas por data
     assert math.isclose(sum(p["valor"] for p in c["parcelas"]), c["total"])
     erros = [[{"data": "2026-10-05", "percentual": 60}],                                  # não soma 100%
@@ -394,9 +396,76 @@ def test_salvar_cronograma_do_aporte(ambiente):
         assert dir_.put(url, json={"mes": "2026-10-31", "parcelas": p}).status_code == 422
     assert cliente(ambiente, "ana.mkt").put(url, json={"mes": "2026-10-31", "parcelas": parcelas}).status_code == 403
     assert dir_.put(url, json={"mes": "2026-10-31", "parcelas": []}).status_code == 200      # volta à parcela única
-    assert not dir_.get(f"/api/resumo?data={HOJE}").json()["cronograma_aporte"]["programado"]
+    assert not dir_.get(f"/api/obras/evans/resumo?data={HOJE}").json()["cronograma_aporte"]["programado"]
 
 
 def test_abas_em_breve_exceto_para_admin(ambiente):
     assert cliente(ambiente, "dora.dir").get("/api/eu").json()["em_breve"] == ["dashboards", "painel"]
     assert cliente(ambiente, "edu.adm").get("/api/eu").json()["em_breve"] == []
+
+
+# ------------------------------------------------------------------------ várias obras
+@pytest.fixture(scope="module")
+def com_berrini(ambiente):
+    """Carrega a planilha da Berrini na mesma base de testes (uma vez)."""
+    caminho = OBRAS_PADRAO[1].caminho_excel
+    if not caminho or not caminho.exists():
+        pytest.skip("planilha da Berrini ausente")
+    return ambiente["servico"].obra("berrini").migrar_do_excel()
+
+
+def test_lista_de_obras(ambiente):
+    obras = cliente(ambiente, "ana.mkt").get("/api/obras").json()
+    assert [o["codigo"] for o in obras][:2] == ["evans", "berrini"]
+    assert set(obras[0]) == {"codigo", "nome"}                     # sem configuração para setor
+    completas = cliente(ambiente, "edu.adm").get("/api/obras").json()
+    assert completas[0]["empresa_spe"] == 73 and completas[1]["empresa_spe"] == 67
+
+
+def test_obra_inexistente(ambiente):
+    r = cliente(ambiente, "dora.dir").get(f"/api/obras/nao-existe/resumo?data={HOJE}")
+    assert r.status_code == 404 and "não encontrada" in r.json()["detail"]
+
+
+def test_dados_isolados_por_obra(ambiente, com_berrini):
+    c = cliente(ambiente, "dora.dir")
+    evans = c.get(f"/api/obras/evans/fontes").json()["fontes"]
+    berrini = c.get(f"/api/obras/berrini/fontes").json()["fontes"]
+    custos = lambda fontes: next(f for f in fontes if f["codigo"] == "custos_spe")
+    assert custos(evans)["registros"] == 195 and custos(evans)["pendentes"] == 0
+    # Na planilha da Berrini o DePara ainda está #N/A: tudo fica pendente, nada é "classificado como #N/A".
+    assert custos(berrini)["registros"] == 0 and custos(berrini)["pendentes"] == 611
+    # O único pago da Berrini hoje vem da aba Custos NN's, que ainda é a cópia da Evans (78 linhas).
+    nn = next(f for f in berrini if f["codigo"] == "custos_nn")
+    pago = c.get(f"/api/obras/berrini/resumo?data={HOJE}").json()["total"]["pago_ate"]
+    assert nn["registros"] == 78 and math.isclose(pago, nn["valor_total"], abs_tol=0.01)
+
+
+def test_projecao_de_uma_obra_nao_afeta_a_outra(ambiente, com_berrini):
+    c = cliente(ambiente, "dora.dir")
+    linha_berrini = ambiente["servico"].banco.um(
+        "SELECT l.id FROM linhas_projecao l JOIN setores s ON s.id = l.setor_id "
+        "WHERE s.obra = 'berrini' AND l.nome = 'Marketing'")["id"]
+    antes = c.get(f"/api/obras/evans/resumo?data={HOJE}").json()["total"]["projetado_proximo"]
+    r = c.put(f"/api/obras/berrini/projecao?data={HOJE}",
+              json=[{"linha_id": linha_berrini, "mes": "2026-11-30", "valor": 5000}])
+    assert r.status_code == 200
+    assert c.get(f"/api/obras/evans/resumo?data={HOJE}").json()["total"]["projetado_proximo"] == antes
+    berrini = c.get(f"/api/obras/berrini/resumo?data={HOJE}").json()["total"]["projetado_proximo"]
+    assert berrini >= 5000
+    # A linha da Berrini não pode ser editada pela rota da Evans.
+    r = c.put(f"/api/obras/evans/projecao?data={HOJE}",
+              json=[{"linha_id": linha_berrini, "mes": "2026-11-30", "valor": 1}])
+    assert r.status_code == 422
+
+
+def test_cadastro_de_obra(ambiente):
+    adm = cliente(ambiente, "edu.adm")
+    r = adm.post("/api/obras", json={"codigo": "nova-obra", "nome": "Nova Obra", "empresa_spe": 99,
+                                     "graph_item_id": "ITEM", "abas": {"recebidas": "Recebidos", "x": "y"}})
+    assert r.status_code == 200 and r.json()["abas"] == {"recebidas": "Recebidos"}
+    assert adm.get(f"/api/obras/nova-obra/resumo?data={HOJE}").status_code == 200
+    setores = adm.get("/api/obras/nova-obra/setores").json()
+    assert {s["codigo"] for s in setores} == {"mkt", "proj", "inc"}            # setores padrão criados
+    assert adm.post("/api/obras", json={"codigo": "Inválido!", "nome": "X"}).status_code == 422
+    assert cliente(ambiente, "dora.dir").post("/api/obras", json={"codigo": "z1", "nome": "Z"}).status_code == 403

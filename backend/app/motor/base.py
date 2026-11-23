@@ -79,6 +79,11 @@ class Base:
     saldos: list[SaldoConta] = field(default_factory=list)
     projecao: list[LinhaProjecao] = field(default_factory=list)
     ultima_atualizacao: datetime | None = None
+    # Identificação da SPE usada pelas fórmulas (vem do cadastro da obra; padrão = Evans,
+    # os valores que a planilha traz fixos nas fórmulas).
+    empresa_spe: int | None = 73
+    cliente_investidor: int | None = 8213
+    historico_aporte_investidor: str | None = "APORTE Bapema Kalil Evans I Spe Ltda"
 
     def __post_init__(self) -> None:
         self._indices: dict[tuple, dict] = {}

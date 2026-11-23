@@ -38,12 +38,23 @@ def chave_concat(fonte: Fonte, linha: dict) -> str:
     return " - ".join(texto_concat(linha.get(c)) for c in fonte.chave)
 
 
+ERROS_EXCEL = {"#N/A", "#REF!", "#VALUE!", "#NAME?", "#DIV/0!", "#NULL!", "#NUM!"}
+
+
+def classificacao_valida(valor) -> str | None:
+    """Classificação utilizável: vazio e erros do Excel (#N/A do DePara não preenchido) contam como pendente."""
+    if valor is None:
+        return None
+    texto = str(valor)
+    return None if not texto.strip() or texto.strip().upper() in ERROS_EXCEL else texto
+
+
 def montar_depara(pares) -> dict[str, str]:
     """(concat, classificação) → dict de busca. Como o MATCH do Excel: ignora caixa
     e vale a primeira ocorrência."""
     depara: dict[str, str] = {}
     for concat, classificacao in pares:
-        if concat is None or classificacao in (None, ""):
+        if concat is None or classificacao_valida(classificacao) is None:
             continue
         depara.setdefault(texto_concat(concat).casefold(), str(classificacao))
     return depara
@@ -90,7 +101,7 @@ def normalizar(codigo: str, linhas: list[dict], depara: dict[str, str]) -> Resul
         classificacao = concat = None
         if fonte.chave:
             concat = chave_concat(fonte, linha)
-            classificacao = depara.get(concat.casefold()) or _texto(linha.get("Classificação")) or None
+            classificacao = depara.get(concat.casefold()) or classificacao_valida(linha.get("Classificação"))
             if classificacao is None:
                 resultado.pendentes.append({"concat": concat, **{c: linha.get(c) for c in fonte.colunas}})
                 continue          # na planilha a linha daria #N/A; aqui fica pendente

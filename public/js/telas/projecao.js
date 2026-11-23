@@ -170,8 +170,8 @@ function gerenciarLinhas(recarregar) {
       ${lista}`,
     acoes: [{ rotulo: 'Salvar', classe: 'primary', ao: async (el) => {
       const v = (n) => el.querySelector(`[name=${n}]`).value.trim();
-      if (v('codigo') || v('nome_setor')) await api('/api/setores', { metodo: 'POST', corpo: { codigo: v('codigo'), nome: v('nome_setor') } });
-      if (v('nome')) await api('/api/linhas', { metodo: 'POST', corpo: { setor_id: Number(v('setor')), nome: v('nome'), rubrica: v('rubrica') } });
+      if (v('codigo') || v('nome_setor')) await api('/obra/setores', { metodo: 'POST', corpo: { codigo: v('codigo'), nome: v('nome_setor') } });
+      if (v('nome')) await api('/obra/linhas', { metodo: 'POST', corpo: { setor_id: Number(v('setor')), nome: v('nome'), rubrica: v('rubrica') } });
       toast('Cadastro atualizado');
       recarregar();
     } }],
@@ -179,7 +179,7 @@ function gerenciarLinhas(recarregar) {
   janela.querySelectorAll('[data-desativar]').forEach((b) => (b.onclick = async () => {
     const linha = linhaPorId(Number(b.dataset.desativar));
     try {
-      await api('/api/linhas', { metodo: 'POST', corpo: { ...linha, setor_id: Number(b.dataset.setor), ativo: 0 } });
+      await api('/obra/linhas', { metodo: 'POST', corpo: { ...linha, setor_id: Number(b.dataset.setor), ativo: 0 } });
       b.closest('.par').remove();
       toast('Linha desativada');
       recarregar();
@@ -216,7 +216,7 @@ function topo(d, usuario) {
 export async function render(el, ctx) {
   const { usuario, dataBase, recarregar } = ctx;
   el.innerHTML = carregando(10);
-  estado.dados = await api(`/api/projecao?data=${dataBase}`);
+  estado.dados = await api(`/obra/projecao?data=${dataBase}`);
   estado.alteracoes.clear();
   const d = estado.dados;
   // Religado a cada desenho da tela: o Projetado × Incorrido redesenha o cabeçalho (e o
@@ -291,7 +291,7 @@ export async function render(el, ctx) {
     botao.innerHTML = '<span class="spin"></span>Salvando';
     try {
       const itens = [...estado.alteracoes].map(([k, valor]) => { const [linha, mes] = k.split('|'); return { linha_id: Number(linha), mes, valor }; });
-      const { salvos } = await api(`/api/projecao?data=${dataBase}`, { metodo: 'PUT', corpo: itens });
+      const { salvos } = await api(`/obra/projecao?data=${dataBase}`, { metodo: 'PUT', corpo: itens });
       estado.alteracoes.clear();
       toast('Projeção salva', { texto: `${salvos} valor(es) atualizados. Resumo e Painel já refletem a mudança.` });
       await render(el, ctx);

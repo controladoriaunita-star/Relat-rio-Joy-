@@ -195,7 +195,7 @@ function editarCronograma(d, recarregar) {
     conteudo: '<div class="cronograma"></div>',
     acoes: [
       { rotulo: 'Parcela única', classe: 'secondary', ao: async () => {
-        await api('/api/parametros/cronograma', { metodo: 'PUT', corpo: { mes, parcelas: [] } });
+        await api('/obra/parametros/cronograma', { metodo: 'PUT', corpo: { mes, parcelas: [] } });
         toast('Cronograma removido', { texto: 'Volta a ser parcela única no dia 1.' });
         recarregar();
       } },
@@ -203,7 +203,7 @@ function editarCronograma(d, recarregar) {
         if (linhas.some((l) => !l.data || l.data < inicio || l.data > mes)) throw new Error('Todas as datas precisam estar dentro do mês.');
         completar();
         if (linhas.at(-1).percentual <= 0.0001) throw new Error('As primeiras parcelas passam do aporte do mês.');
-        await api('/api/parametros/cronograma', { metodo: 'PUT', corpo: { mes, parcelas: linhas } });
+        await api('/obra/parametros/cronograma', { metodo: 'PUT', corpo: { mes, parcelas: linhas } });
         toast('Cronograma salvo', { texto: `${linhas.length} parcela(s).` });
         recarregar();
       } },
@@ -240,7 +240,7 @@ function editarCronograma(d, recarregar) {
 
 // ------------------------------------------------------------------ premissas
 async function editarPremissas(recarregar) {
-  const { premissas: p } = await api('/api/parametros');
+  const { premissas: p } = await api('/obra/parametros');
   const campo = (nome, rotulo, ajuda = '') => `<div class="field"><label>${rotulo}</label>
     <input name="${nome}" value="${fmt.numero(p[nome])}" inputmode="decimal" />${ajuda ? `<small>${ajuda}</small>` : ''}</div>`;
   const numericos = ['caixa_minimo', 'caixa_minimo_proximo', 'receita_projetada_proximo', 'ajuste_saldo_banco'];
@@ -258,7 +258,7 @@ async function editarPremissas(recarregar) {
       if (Object.values(corpo).some((v) => Number.isNaN(v))) {
         throw new Error('Há valores inválidos.');
       }
-      await api('/api/parametros/premissas', { metodo: 'PUT', corpo });
+      await api('/obra/parametros/premissas', { metodo: 'PUT', corpo });
       toast('Premissas salvas');
       recarregar();
     } }],
@@ -266,12 +266,12 @@ async function editarPremissas(recarregar) {
 }
 
 // ------------------------------------------------------------------ tela
-export async function render(el, { usuario, dataBase, recarregar }) {
+export async function render(el, { usuario, dataBase, recarregar, obra }) {
   el.innerHTML = carregando(10);
-  const d = await api(`/api/resumo?data=${dataBase}`);
+  const d = await api(`/obra/resumo?data=${dataBase}`);
   el.innerHTML = `<div class="fade">
     <div class="cabecalho"><div>
-      <div class="eyebrow">Relatório de Aporte · Evans</div><h2>Resumo de Custos e Despesas</h2>
+      <div class="eyebrow">Relatório de Aporte · ${esc(obra.nome)}</div><h2>Resumo de Custos e Despesas</h2>
       <p>Mês corrente <b>${fmt.mesLongo(d.datas.mes_atual)}</b> · mês de análise ${fmt.mesLongo(d.datas.mes_analise)} · última atualização ${fmt.dataHora(d.ultima_atualizacao)}</p>
     </div><div class="row-flex sem-impressao">
       ${usuario.permissoes['premissas.editar'] ? '<button class="btn secondary sm" id="premissas">Premissas</button>' : ''}

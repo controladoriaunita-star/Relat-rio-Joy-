@@ -13,7 +13,6 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date
 
-from ..config import CLIENTE_INVESTIDOR, EMPRESA_SPE, HISTORICO_APORTE_INVESTIDOR
 from ..excel_funcoes import DATA_ZERO, chave_texto, eomonth, texto_igual
 from .base import Base
 
@@ -62,13 +61,13 @@ def recebimentos(base: Base, ate: date) -> list[dict]:
     No mês corrente, investidor (parte da Recebidas) + receitas = receitas do Resumo (Z6)."""
     por_mes = defaultdict(lambda: {"investidor": 0.0, "holding": 0.0, "receitas": 0.0})
     for r in base.recebidas:
-        por_mes[r.fim_mes]["investidor" if r.cliente == CLIENTE_INVESTIDOR else "receitas"] += r.valor
+        por_mes[r.fim_mes]["investidor" if r.cliente == base.cliente_investidor else "receitas"] += r.valor
     for t in base.transferencias:
-        if t.empresa != EMPRESA_SPE and t.empresa_credito == EMPRESA_SPE:
+        if t.empresa != base.empresa_spe and t.empresa_credito == base.empresa_spe:
             por_mes[t.fim_mes]["holding"] += t.valor
     for e in base.entradas:
         classe = chave_texto((e.classificacao or "").strip())
-        if classe == chave_texto("Aporte") and texto_igual(e.historico, HISTORICO_APORTE_INVESTIDOR):
+        if classe == chave_texto("Aporte") and texto_igual(e.historico, base.historico_aporte_investidor):
             por_mes[e.fim_mes]["investidor"] += e.valor
         elif classe == chave_texto("Aporte Holding"):
             por_mes[e.fim_mes]["holding"] += e.valor

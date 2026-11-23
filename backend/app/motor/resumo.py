@@ -26,7 +26,6 @@ from __future__ import annotations
 from datetime import date
 
 from ..catalogo import LINHAS_RESUMO, Premissas
-from ..config import CLIENTE_INVESTIDOR, EMPRESA_SPE
 from ..excel_funcoes import DATA_ZERO, eomonth, texto_data, texto_igual, texto_mes
 from .base import Base, somar
 
@@ -62,8 +61,8 @@ def _pago_ate(base: Base, rotulo: str, mes: date) -> float:          # coluna H
 
 
 def _retorno_holding_ate(base: Base, rotulo: str, mes_analise: date) -> float:  # H41
-    return (somar(base.transferencias, lambda t: t.empresa == EMPRESA_SPE
-                  and t.empresa_credito != EMPRESA_SPE and t.fim_mes <= mes_analise)
+    return (somar(base.transferencias, lambda t: t.empresa == base.empresa_spe
+                  and t.empresa_credito != base.empresa_spe and t.fim_mes <= mes_analise)
             + somar(base.filtrar("saidas", "classificacao", rotulo),
                     lambda m: m.fim_mes <= mes_analise))
 
@@ -128,15 +127,15 @@ def receitas_do_mes(base: Base, mes: date) -> float:
 
 
 def _recebidas_do_investidor(base: Base, mes: date) -> float:
-    """Parte das receitas do mês que é aporte do investidor (Recebidas do CLIENTE_INVESTIDOR)."""
-    return somar(base.recebidas, lambda r: r.fim_mes == mes and r.cliente == CLIENTE_INVESTIDOR)
+    """Parte das receitas do mês que é aporte do investidor (Recebidas do cliente investidor da obra)."""
+    return somar(base.recebidas, lambda r: r.fim_mes == mes and r.cliente == base.cliente_investidor)
 
 
 def _transferencias_da_holding(base: Base, mes: date) -> float:
     """Transferências de outras empresas do grupo para a SPE no mês. São aportes que não
     passam pela Recebidas: não reduzem o aporte necessário e contam como parte dele já recebida."""
-    return somar(base.transferencias, lambda t: t.empresa != EMPRESA_SPE
-                 and t.empresa_credito == EMPRESA_SPE and t.fim_mes == mes)
+    return somar(base.transferencias, lambda t: t.empresa != base.empresa_spe
+                 and t.empresa_credito == base.empresa_spe and t.fim_mes == mes)
 
 
 def calcular_resumo(base: Base, hoje: date, viabilidade: dict[str, float],

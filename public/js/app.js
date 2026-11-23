@@ -1,5 +1,6 @@
-// Inicialização: sessão, app shell, navegação por abas e data-base.
-import { api, erroToast, esc, modal, toast } from './util.js';
+// Inicialização: sessão, app shell, obra, navegação por abas e data-base.
+// URL: #<obra>/<aba> (ex.: #berrini/projecao); #<aba> usa a última obra escolhida.
+import { api, definirObra, erroToast, esc, modal, toast } from './util.js';
 import * as sessao from './sessao.js';
 import * as resumo from './telas/resumo.js';
 import * as aportes from './telas/aportes.js';
@@ -18,7 +19,19 @@ const ABAS = [
 ];
 const raiz = document.getElementById('raiz');
 const hojeIso = () => new Date().toLocaleDateString('sv-SE');
-const estado = { usuario: null, dataBase: hojeIso(), abaAtual: null };
+const estado = { usuario: null, dataBase: hojeIso(), abaAtual: null, obras: [], obra: null };
+const CHAVE_OBRA = 'aporte.obra';
+const lembrarObra = (codigo) => { try { localStorage.setItem(CHAVE_OBRA, codigo); } catch { /* sem storage */ } };
+const obraLembrada = () => { try { return localStorage.getItem(CHAVE_OBRA); } catch { return null; } };
+
+/** Lê #obra/aba da URL; aceita o formato antigo #aba. */
+function lerRota() {
+  const partes = location.hash.slice(1).split('/').filter(Boolean);
+  const ehObra = (c) => estado.obras.some((o) => o.codigo === c);
+  const obra = ehObra(partes[0]) ? partes.shift() : null;
+  return { obra: obra || (ehObra(obraLembrada()) ? obraLembrada() : estado.obras[0]?.codigo), aba: partes[0] };
+}
+const rota = (aba, obra = estado.obra?.codigo) => `#${obra}/${aba}`;
 
 const emBreve = (aba) => (estado.usuario.em_breve || []).includes(aba.id);
 const abasVisiveis = () => ABAS.filter((a) => !a.permissao || estado.usuario.permissoes[a.permissao]);
@@ -27,7 +40,7 @@ const abasVisiveis = () => ABAS.filter((a) => !a.permissao || estado.usuario.per
 function cartaoAcesso(titulo, subtitulo, corpo) {
   raiz.innerHTML = `<div class="login"><div class="card fade">
     <img src="/assets/logo-joy.png" alt="Joy+" />
-    <div class="eyebrow">Evans · Controladoria</div>
+    <div class="eyebrow">Joy+ · Controladoria</div>
     <h1>${esc(titulo)}</h1><p>${esc(subtitulo)}</p>${corpo}</div></div>`;
   return raiz.querySelector('.card');
 }
@@ -91,7 +104,10 @@ function montarShell() {
   raiz.innerHTML = `
     <header class="app"><div class="in">
       <img class="logo" src="/assets/logo-joy.png" alt="Joy+" />
-      <nav aria-label="Abas">${abasVisiveis().map((a) => `<a href="#${a.id}" data-aba="${a.id}">${esc(a.titulo)}${emBreve(a) ? ' <span class="badge b-neutral em-breve">Em breve</span>' : ''}</a>`).join('')}</nav>
+      ${estado.obras.length > 1 ? `<label class="seletor-obra" title="Obra"><span>Obra</span><select id="obra">
+        ${estado.obras.map((o) => `<option value="${esc(o.codigo)}">${esc(o.nome)}</option>`).join('')}</select></label>`
+        : `<span class="obra-unica">${esc(estado.obra?.nome || '')}</span>`}
+      <nav aria-label="Abas">${abasVisiveis().map((a) => `<a href="${rota(a.id)}" data-aba="${a.id}">${esc(a.titulo)}${emBreve(a) ? ' <span class="badge b-neutral em-breve">Em breve</span>' : ''}</a>`).join('')}</nav>
       <div class="direita">
         <label class="data-base" title="Data usada como 'hoje' nos cálculos (a planilha usa HOJE())">
           <span>Data-base</span><input type="date" id="data-base" value="${estado.dataBase}" />
@@ -122,22 +138,40 @@ function montarShell() {
     } }],
   }));
   document.getElementById('data-base').onchange = (e) => { estado.dataBase = e.target.value || hojeIso(); renderizar(); };
+  document.getElementById('obra')?.addEventListener('change', (e) => {
+    location.hash = rota(estado.abaAtual?.id || abasVisiveis()[0]?.id || 'resumo', e.target.value);
+  });
 }
 
 async function renderizar() {
   const abas = abasVisiveis();
-  const aba = abas.find((a) => a.id === location.hash.slice(1)) || abas[0];
+  const { obra: codigoObra, aba: idAba } = lerRota();
+  const aba = abas.find((a) => a.id === idAba) || abas[0];
   const conteudo = document.getElementById('conteudo');
+  if (!estado.obras.length) {
+    conteudo.innerHTML = `<div class="card empty"><h3>Nenhuma obra cadastrada</h3>
+      <p>Cadastre a primeira obra em API's › Obras.</p></div>`;
+    return;
+  }
   if (!aba) {
     conteudo.innerHTML = `<div class="card empty"><h3>Sem abas liberadas</h3>
       <p>Seu perfil ainda não tem acesso a nenhuma aba. Fale com a Controladoria.</p></div>`;
     return;
   }
-  if (estado.abaAtual?.tela.sair && estado.abaAtual !== aba && !estado.abaAtual.tela.sair()) {
-    location.hash = estado.abaAtual.id;       // alterações não salvas
+  const trocouObra = estado.obra && estado.obra.codigo !== codigoObra;
+  if (estado.abaAtual?.tela.sair && (estado.abaAtual !== aba || trocouObra) && !estado.abaAtual.tela.sair()) {
+    location.hash = rota(estado.abaAtual.id);   // alterações não salvas: fica onde estava
     return;
   }
   estado.abaAtual = aba;
+  estado.obra = estado.obras.find((o) => o.codigo === codigoObra);
+  definirObra(estado.obra.codigo);
+  lembrarObra(estado.obra.codigo);
+  const seletor = document.getElementById('obra');
+  if (seletor) seletor.value = estado.obra.codigo;
+  if (location.hash !== rota(aba.id)) history.replaceState(null, '', rota(aba.id));
+  document.querySelectorAll('header.app nav a').forEach((a) => { a.href = rota(a.dataset.aba); });
+  document.title = `${estado.obra.nome} · Relatório de Aporte · Joy+`;
   document.querySelectorAll('header.app nav a').forEach((a) => a.classList.toggle('on', a.dataset.aba === aba.id));
   if (emBreve(aba)) {
     conteudo.innerHTML = `<div class="card empty fade"><span class="badge b-primary">Em breve</span>
@@ -145,7 +179,8 @@ async function renderizar() {
     return;
   }
   try {
-    await aba.tela.render(conteudo, { usuario: estado.usuario, dataBase: estado.dataBase, recarregar: renderizar });
+    await aba.tela.render(conteudo, { usuario: estado.usuario, dataBase: estado.dataBase, recarregar: renderizar,
+                                      obra: estado.obra });
   } catch (erro) {
     if (erro.status === 401) return;
     conteudo.innerHTML = `<div class="alert a-error"><b>Erro ao carregar a aba</b><div>${esc(erro.message)}</div></div>`;
@@ -155,7 +190,8 @@ async function renderizar() {
 async function iniciar() {
   if (sessao.precisaDefinirSenha()) return telaDefinirSenha();
   try {
-    estado.usuario = await api('/api/eu');
+    [estado.usuario, estado.obras] = await Promise.all([api('/api/eu'), api('/api/obras')]);
+    estado.obras = estado.obras.filter((o) => o.ativo !== false);
   } catch (erro) {
     return telaLogin(erro.status === 401 && (await sessao.token()) ? 'Seu usuário ainda não tem perfil de acesso. Fale com a Controladoria.' : '');
   }

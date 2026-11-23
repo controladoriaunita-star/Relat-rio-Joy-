@@ -51,7 +51,7 @@ function tabela(lancamentos) {
 
 export async function render(alvo, { dataBase }) {
   alvo.innerHTML = carregando();
-  const d = await api(`/api/aportes?data=${dataBase}`);
+  const d = await api(`/obra/aportes?data=${dataBase}`);
   const desenhar = () => {
     alvo.innerHTML = `<div class="fade">
       <div class="titulo-pagina" style="margin-bottom:16px"><h2 style="margin:0">Aportes até ${fmt.data(d.ate)}</h2>

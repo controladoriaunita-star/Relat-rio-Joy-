@@ -15,7 +15,7 @@ from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.worksheet.formula import ArrayFormula
 
 from backend.app.catalogo import VIABILIDADE_PADRAO, Premissas
-from backend.app.config import ARQUIVO_EXCEL
+from backend.app.obras import OBRAS_PADRAO
 from backend.app.excel_funcoes import DATA_ZERO
 from backend.app.fontes.excel import ler_planilha
 from backend.app.fontes.montagem import montar_base
@@ -23,6 +23,7 @@ from backend.app.excel_funcoes import chave_texto
 from backend.app.motor.painel import calcular_painel
 from backend.app.motor.resumo import calcular_resumo, receitas_do_mes
 
+ARQUIVO_EXCEL = OBRAS_PADRAO[0].caminho_excel          # Evans
 pytestmark = pytest.mark.skipif(not ARQUIVO_EXCEL.exists(), reason="planilha de referência ausente")
 
 COLUNA_INICIO_TL = column_index_from_string("CE")

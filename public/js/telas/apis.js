@@ -32,7 +32,7 @@ function cartaoFonte(f, podeClassificar) {
 }
 
 async function abrirPendentes(codigo, rubricas, recarregar) {
-  const pendentes = await api(`/api/fontes/${codigo}/pendentes`);
+  const pendentes = await api(`/obra/fontes/${codigo}/pendentes`);
   const opcoes = rubricas.map((r) => `<option>${esc(r)}</option>`).join('');
   const linhas = pendentes.map((p, i) => {
     const valor = p.TotalLiquido ?? p.Valor_es;
@@ -47,7 +47,7 @@ async function abrirPendentes(codigo, rubricas, recarregar) {
     acoes: [{ rotulo: 'Salvar classificações', classe: 'primary', ao: async (el) => {
       const escolhas = [...el.querySelectorAll('select[data-i]')].filter((s) => s.value);
       for (const s of escolhas) {
-        await api(`/api/fontes/${codigo}/classificar`, { metodo: 'POST',
+        await api(`/obra/fontes/${codigo}/classificar`, { metodo: 'POST',
           corpo: { concat: pendentes[s.dataset.i].concat, classificacao: s.value } });
       }
       toast(`${escolhas.length} lançamento(s) classificados`);
@@ -57,7 +57,7 @@ async function abrirPendentes(codigo, rubricas, recarregar) {
 }
 
 async function fontes(el, ctx) {
-  const dados = await api('/api/fontes');
+  const dados = await api('/obra/fontes');
   const ultima = dados.fontes.map((f) => f.ultima_ok?.iniciado_em).filter(Boolean).sort().pop();
   const falhas = dados.fontes.filter((f) => f.ultima?.status === 'erro');
   const pendentes = dados.fontes.reduce((a, f) => a + f.pendentes, 0);
@@ -72,7 +72,7 @@ async function fontes(el, ctx) {
       <div>O cálculo continua usando a última carga válida de cada fonte. ${esc(falhas[0].ultima.mensagem)}</div></div>` : ''}
     ${ctx.usuario.permissoes['fontes.atualizar'] ? `<div class="row-flex" style="margin-bottom:16px">
       <button class="btn primary" id="atualizar-graph">Atualizar do SharePoint</button>
-      ${dados.excel_disponivel ? '<button class="btn secondary" id="atualizar-excel" title="Lê as tabelas do Controle - Joy+ Evans.xlsm da pasta do projeto">Importar do Excel local</button>' : ''}
+      ${dados.excel_disponivel ? '<button class="btn secondary" id="atualizar-excel" title="Lê as tabelas da planilha de controle desta obra, na pasta do projeto">Importar do Excel local</button>' : ''}
     </div>` : ''}
     <div class="fontes">${dados.fontes.map((f) => cartaoFonte(f, ctx.usuario.permissoes['fontes.classificar'])).join('')}</div>
     <p class="sub" style="margin-top:28px">Últimas cargas</p>
@@ -86,7 +86,14 @@ async function fontes(el, ctx) {
     botao.disabled = true;
     botao.innerHTML = '<span class="spin"></span>Atualizando';
     try {
-      const relatorio = await api('/api/fontes/atualizar', { metodo: 'POST', corpo: { origem } });
+      // SharePoint: uma fonte por requisição. Arquivos pesados levam ~15 s por aba no Graph e a
+      // função da Vercel tem limite de 60 s por chamada. O Excel local é lido de uma vez.
+      const lotes = origem === 'graph' ? dados.fontes.map((f) => [f.codigo]) : [null];
+      const relatorio = [];
+      for (const [i, fontes] of lotes.entries()) {
+        if (origem === 'graph') botao.innerHTML = `<span class="spin"></span>Atualizando ${i + 1} de ${lotes.length}`;
+        relatorio.push(...await api('/obra/fontes/atualizar', { metodo: 'POST', corpo: { origem, fontes } }));
+      }
       const erros = relatorio.filter((r) => r.status === 'erro');
       if (erros.length) toast(`${erros.length} fonte(s) com erro`, { tipo: 'warning', texto: erros[0].mensagem, duracao: 7000 });
       else toast('Fontes atualizadas', { texto: `${relatorio.length} tabelas validadas.` });
@@ -99,7 +106,7 @@ async function fontes(el, ctx) {
 }
 
 async function saldos(el) {
-  const lista = await api('/api/saldos');
+  const lista = await api('/obra/saldos');
   el.innerHTML = `
     <div class="alert a-info" style="margin-bottom:16px"><b>Saldos lidos da aba "Saldo" do SharePoint</b>
       <div>Atualizados junto com as demais fontes. Para cada conta, o Resumo usa o último lançamento do mês
@@ -111,7 +118,7 @@ async function saldos(el) {
 }
 
 async function parametros(el, ctx) {
-  const { viabilidade } = await api('/api/parametros');
+  const { viabilidade } = await api('/obra/parametros');
   const pode = ctx.usuario.permissoes['premissas.editar'];
   el.innerHTML = `<div class="alert a-info" style="margin-bottom:16px"><b>Valor de viabilidade (EVE) por rubrica</b>
       <div>Coluna D do Resumo e X do Painel. As premissas do aporte ficam no botão "Premissas" da aba Resumo.</div></div>
@@ -123,7 +130,7 @@ async function parametros(el, ctx) {
     e.preventDefault();
     const corpo = Object.fromEntries([...e.currentTarget.querySelectorAll('input')].map((i) => [i.name, lerNumero(i.value)]));
     if (Object.values(corpo).some(Number.isNaN)) return toast('Há valores inválidos', { tipo: 'error' });
-    try { await api('/api/parametros/viabilidade', { metodo: 'PUT', corpo }); toast('Viabilidade salva'); ctx.recarregar(); }
+    try { await api('/obra/parametros/viabilidade', { metodo: 'PUT', corpo }); toast('Viabilidade salva'); ctx.recarregar(); }
     catch (erro) { erroToast(erro); }
   };
 }
@@ -179,8 +186,63 @@ async function permissoes(el, ctx) {
   }));
 }
 
+async function obras(el) {
+  const lista = await api('/api/obras');
+  const fontesPadrao = lista[0]?.fontes || [];
+  el.innerHTML = `<div class="alert a-info" style="margin-bottom:16px"><b>Obras</b>
+      <div>Cada obra usa o mesmo fluxo de API da Evans: um arquivo na pasta 06 - API do SharePoint, com as mesmas abas.
+      Fórmulas, telas e usuários são comuns a todas as obras.</div></div>
+    <div class="row-flex" style="margin-bottom:12px"><button class="btn primary" id="nova-obra">Nova obra</button></div>
+    <div class="sheet"><table><thead><tr><th class="first">Obra</th><th style="text-align:left">Código</th><th>Empresa SPE</th>
+      <th>Cliente investidor</th><th style="text-align:left">Arquivo do SharePoint</th><th style="text-align:left">Abas diferentes</th><th>Situação</th><th></th></tr></thead>
+    <tbody>${lista.map((o) => `<tr><td class="first">${esc(o.nome)}</td><td style="text-align:left">${esc(o.codigo)}</td>
+      <td>${o.empresa_spe ?? '—'}</td><td>${o.cliente_investidor ?? '<span class="badge b-warning">definir</span>'}</td>
+      <td style="text-align:left" class="mono">${o.graph_item_id ? esc(o.graph_item_id) : '<span class="badge b-error">sem arquivo</span>'}</td>
+      <td style="text-align:left">${Object.keys(o.abas || {}).length ? Object.entries(o.abas).map(([k, v]) => `${esc(k)} → ${esc(v)}`).join('<br>') : '—'}</td>
+      <td><span class="badge ${o.ativo ? 'b-success' : 'b-neutral'}">${o.ativo ? 'Ativa' : 'Inativa'}</span></td>
+      <td><button class="btn ghost sm" data-editar="${esc(o.codigo)}">Editar</button></td></tr>`).join('')}</tbody></table></div>`;
+
+  const formulario = (o = {}) => {
+    const campo = (nome, rotulo, valor, extra = '') => `<div class="field"><label>${rotulo}</label>
+      <input name="${nome}" value="${esc(valor ?? '')}" ${extra} /></div>`;
+    const abas = fontesPadrao.map((f) => `<div class="field"><label>${esc(f.titulo)}</label>
+      <input name="aba_${f.codigo}" value="${esc((o.abas || {})[f.codigo] || '')}" placeholder="${esc(f.aba_padrao)}" /></div>`).join('');
+    modal({
+      titulo: o.codigo ? `Obra ${o.nome}` : 'Nova obra',
+      conteudo: `<div class="grid" style="margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+          ${campo('codigo', 'Código (na URL e no banco)', o.codigo, o.codigo ? 'disabled' : 'placeholder="ex.: brooklin"')}
+          ${campo('nome', 'Nome', o.nome)}
+          ${campo('empresa_spe', 'Empresa SPE (código UAU)', o.empresa_spe, 'inputmode="numeric"')}
+          ${campo('cliente_investidor', 'Cliente investidor (Recebidas)', o.cliente_investidor, 'inputmode="numeric"')}
+          ${campo('historico_aporte_investidor', 'Histórico do aporte (Controle Entradas)', o.historico_aporte_investidor)}
+          ${campo('graph_item_id', 'Arquivo do SharePoint (item id)', o.graph_item_id)}
+          ${campo('arquivo_excel', 'Planilha de controle local', o.arquivo_excel, 'placeholder="Controle - Joy+ <Obra>.xlsm"')}
+          ${campo('ordem', 'Ordem no seletor', o.ordem ?? 0, 'inputmode="numeric"')}
+          <label class="row-flex muted" style="gap:6px"><input type="checkbox" name="ativo" ${o.ativo === false ? '' : 'checked'} /> Obra ativa</label>
+        </div>
+        <p class="sub" style="margin-top:20px">Nome das abas no arquivo (deixe vazio quando for igual ao padrão)</p>
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">${abas}</div>`,
+      acoes: [{ rotulo: 'Salvar obra', classe: 'primary', ao: async (m) => {
+        const v = (n) => m.querySelector(`[name=${n}]`).value.trim();
+        const corpo = {
+          codigo: o.codigo || v('codigo'), nome: v('nome'), empresa_spe: v('empresa_spe') || null,
+          cliente_investidor: v('cliente_investidor') || null, historico_aporte_investidor: v('historico_aporte_investidor') || null,
+          graph_item_id: v('graph_item_id') || null, arquivo_excel: v('arquivo_excel') || null,
+          ordem: Number(v('ordem') || 0), ativo: m.querySelector('[name=ativo]').checked,
+          abas: Object.fromEntries(fontesPadrao.map((f) => [f.codigo, v(`aba_${f.codigo}`)]).filter(([, aba]) => aba)),
+        };
+        await api('/api/obras', { metodo: 'POST', corpo });
+        toast('Obra salva', { texto: 'O seletor de obras será atualizado.' });
+        setTimeout(() => window.location.reload(), 700);
+      } }],
+    });
+  };
+  el.querySelector('#nova-obra').onclick = () => formulario();
+  el.querySelectorAll('[data-editar]').forEach((b) => (b.onclick = () => formulario(lista.find((o) => o.codigo === b.dataset.editar))));
+}
+
 async function historico(el) {
-  const itens = await api('/api/historico?limite=300');
+  const itens = await api('/obra/historico?limite=300');
   el.innerHTML = `<div class="sheet" style="max-height:70vh"><table><thead><tr><th class="first">Quando</th><th style="text-align:left">Usuário</th>
     <th style="text-align:left">Ação</th><th style="text-align:left">Detalhe</th></tr></thead>
     <tbody>${itens.map((h) => `<tr><td class="first">${fmt.dataHora(h.quando)}</td><td style="text-align:left">${esc(h.usuario || 'sistema')}</td>
@@ -194,6 +256,7 @@ const SUB_ABAS = [
   { id: 'parametros', titulo: 'Viabilidade', tela: parametros },
   { id: 'usuarios', titulo: 'Usuários', tela: usuarios, permissao: 'gerir_usuarios' },
   { id: 'permissoes', titulo: 'Permissões', tela: permissoes, permissao: 'usuarios.gerenciar' },
+  { id: 'obras', titulo: 'Obras', tela: obras, permissao: 'obras.gerenciar' },
   { id: 'historico', titulo: 'Histórico', tela: historico },
 ];
 

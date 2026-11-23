@@ -9,7 +9,9 @@ import math
 from datetime import date
 
 from backend.app.catalogo import VIABILIDADE_PADRAO, Premissas
-from backend.app.config import CLIENTE_INVESTIDOR, EMPRESA_SPE
+from backend.app.obras import OBRAS_PADRAO
+
+EMPRESA_SPE, CLIENTE_INVESTIDOR = OBRAS_PADRAO[0].empresa_spe, OBRAS_PADRAO[0].cliente_investidor   # Evans
 from backend.app.motor.base import Base, Desembolso, Movimento, Recebimento, SaldoConta, Transferencia
 from backend.app.motor.resumo import calcular_resumo
 

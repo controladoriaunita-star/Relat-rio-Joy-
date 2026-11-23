@@ -77,7 +77,7 @@ export async function render(el, opcoes) {
   };
   const [ano, mes] = estado.mes.split('-').map(Number);
   const fim = new Date(ano, mes, 0).toLocaleDateString('sv-SE');
-  const d = await api(`/api/projecao/comparativo?mes=${fim}${estado.setor ? `&setor=${encodeURIComponent(estado.setor)}` : ''}`);
+  const d = await api(`/obra/projecao/comparativo?mes=${fim}${estado.setor ? `&setor=${encodeURIComponent(estado.setor)}` : ''}`);
   const conteudo = el.querySelector('#comp-conteudo');
   // Outro filtro foi escolhido, ou o usuário voltou para a Grade, antes da resposta chegar.
   if (versao !== estado.versao || !conteudo) return;

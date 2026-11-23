@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from datetime import date
 
-from ..config import EMPRESA_SPE
 from .base import Base
 
 EMPRESAS_JOY = {10: "Joy+", 1: "Unità"}
@@ -25,7 +24,7 @@ def aportes_ate(base: Base, hoje: date) -> dict:
     joy = [{"data": _data(t), "origem": "joy", "empresa": EMPRESAS_JOY.get(t.empresa), "codigo": t.empresa,
             "valor": t.valor}
            for t in base.transferencias
-           if t.empresa != EMPRESA_SPE and t.empresa_credito == EMPRESA_SPE and _data(t) <= hoje]
+           if t.empresa != base.empresa_spe and t.empresa_credito == base.empresa_spe and _data(t) <= hoje]
     apontamentos = [a for a in joy if a["empresa"] is None]
 
     por_empresa = {nome: sum(a["valor"] for a in joy if a["empresa"] == nome) for nome in EMPRESAS_JOY.values()}

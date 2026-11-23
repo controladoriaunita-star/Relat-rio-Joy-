@@ -1,4 +1,4 @@
-"""Configuração central: caminhos, variáveis de ambiente e constantes de negócio."""
+"""Configuração central: caminhos e variáveis de ambiente (o que é de cada obra fica em obras.py)."""
 from __future__ import annotations
 
 import os
@@ -8,7 +8,6 @@ RAIZ_SISTEMA = Path(__file__).resolve().parents[2]
 RAIZ_PROJETO = RAIZ_SISTEMA.parent
 PASTA_WEB = RAIZ_SISTEMA / "public"      # na Vercel, servida como estático
 PASTA_DADOS = Path(os.environ.get("APORTE_DATA_DIR", RAIZ_SISTEMA / "data"))
-ARQUIVO_EXCEL = RAIZ_PROJETO / "Controle - Joy+ Evans.xlsm"
 
 
 def _carregar_env(caminho: Path) -> None:
@@ -44,10 +43,5 @@ SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")   # só projetos
 GRAPH_TENANT_ID = os.environ.get("GRAPH_TENANT_ID", "")
 GRAPH_CLIENT_ID = os.environ.get("GRAPH_CLIENT_ID", "")
 GRAPH_CLIENT_SECRET = os.environ.get("GRAPH_CLIENT_SECRET", "")
-GRAPH_DRIVE_ID = os.environ.get("GRAPH_DRIVE_ID", "")
-GRAPH_ITEM_ID = os.environ.get("GRAPH_ITEM_ID", "")
-
-# --- Regras de negócio fixas nas fórmulas da planilha -------------------------
-EMPRESA_SPE = 73                                  # código da SPE Evans no UAU
-CLIENTE_INVESTIDOR = 8213                         # Recebidas[CódigoCliente] do investidor
-HISTORICO_APORTE_INVESTIDOR = "APORTE Bapema Kalil Evans I Spe Ltda"
+GRAPH_DRIVE_ID = os.environ.get("GRAPH_DRIVE_ID", "")   # biblioteca da pasta 06 - API
+# O arquivo de cada obra (item id) fica no cadastro da obra (backend/app/obras.py).

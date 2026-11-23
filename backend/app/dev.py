@@ -26,9 +26,11 @@ from .servicos import Servico  # noqa: E402
 
 def preparar(servico: Servico) -> None:
     servico.inicializar()
-    if not servico.banco.um("SELECT 1 FROM cargas LIMIT 1") and config.ARQUIVO_EXCEL.exists():
-        print("Primeira execução: carregando dados da planilha...")
-        servico.migrar_do_excel()
+    for obra in servico.obras():
+        caminho = obra.caminho_excel
+        if caminho and caminho.exists() and not servico.banco.um("SELECT 1 FROM cargas WHERE obra = ? LIMIT 1", obra.codigo):
+            print(f"Primeira execução: carregando a planilha da obra {obra.nome}...")
+            servico.obra(obra.codigo).migrar_do_excel()
     com_usuario = {p for u in servico.listar_usuarios() if u["ativo"] for p in u["papeis"]}
     for papel, nome in servico.perfis().items():
         if papel not in com_usuario:

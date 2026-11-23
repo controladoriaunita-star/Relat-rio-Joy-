@@ -33,9 +33,13 @@ CREATE TABLE IF NOT EXISTS user_roles (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE, granted_by TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE (user_id, role_id));
+CREATE TABLE IF NOT EXISTS obras (
+    codigo TEXT PRIMARY KEY, nome TEXT NOT NULL, ordem INTEGER NOT NULL DEFAULT 0,
+    ativo INTEGER NOT NULL DEFAULT 1, config TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS setores (
-    id INTEGER PRIMARY KEY, codigo TEXT NOT NULL UNIQUE, nome TEXT NOT NULL,
-    ordem INTEGER NOT NULL DEFAULT 0, ativo INTEGER NOT NULL DEFAULT 1);
+    id INTEGER PRIMARY KEY, obra TEXT NOT NULL REFERENCES obras(codigo), codigo TEXT NOT NULL,
+    nome TEXT NOT NULL, ordem INTEGER NOT NULL DEFAULT 0, ativo INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (obra, codigo));
 CREATE TABLE IF NOT EXISTS linhas_projecao (
     id INTEGER PRIMARY KEY, setor_id INTEGER NOT NULL REFERENCES setores(id),
     nome TEXT NOT NULL, rubrica TEXT NOT NULL, ordem INTEGER NOT NULL DEFAULT 0,
@@ -44,18 +48,23 @@ CREATE TABLE IF NOT EXISTS projecoes (
     linha_id INTEGER NOT NULL REFERENCES linhas_projecao(id), mes TEXT NOT NULL,
     valor REAL NOT NULL, atualizado_por TEXT, atualizado_em TEXT, PRIMARY KEY (linha_id, mes));
 CREATE TABLE IF NOT EXISTS depara (
-    fonte TEXT NOT NULL, chave TEXT NOT NULL, concat TEXT NOT NULL, classificacao TEXT NOT NULL,
-    atualizado_por TEXT, atualizado_em TEXT, PRIMARY KEY (fonte, chave));
+    obra TEXT NOT NULL REFERENCES obras(codigo), fonte TEXT NOT NULL, chave TEXT NOT NULL,
+    concat TEXT NOT NULL, classificacao TEXT NOT NULL, atualizado_por TEXT, atualizado_em TEXT,
+    PRIMARY KEY (obra, fonte, chave));
 CREATE TABLE IF NOT EXISTS saldos (
     id INTEGER PRIMARY KEY, empresa INTEGER NOT NULL, conta TEXT NOT NULL, descricao TEXT,
     data TEXT NOT NULL, saldo REAL NOT NULL, UNIQUE (empresa, conta, data));
-CREATE TABLE IF NOT EXISTS parametros (chave TEXT PRIMARY KEY, valor TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS parametros (
+    obra TEXT NOT NULL REFERENCES obras(codigo), chave TEXT NOT NULL, valor TEXT NOT NULL,
+    PRIMARY KEY (obra, chave));
 CREATE TABLE IF NOT EXISTS cargas (
-    id INTEGER PRIMARY KEY, fonte TEXT NOT NULL, origem TEXT NOT NULL, iniciado_em TEXT NOT NULL,
-    duracao_s REAL, status TEXT NOT NULL, linhas INTEGER, mensagem TEXT, dados TEXT);
-CREATE INDEX IF NOT EXISTS ix_cargas_fonte ON cargas (fonte, id);
+    id INTEGER PRIMARY KEY, obra TEXT NOT NULL REFERENCES obras(codigo), fonte TEXT NOT NULL,
+    origem TEXT NOT NULL, iniciado_em TEXT NOT NULL, duracao_s REAL, status TEXT NOT NULL,
+    linhas INTEGER, mensagem TEXT, dados TEXT);
+CREATE INDEX IF NOT EXISTS ix_cargas_obra_fonte ON cargas (obra, fonte, id);
 CREATE TABLE IF NOT EXISTS historico (
-    id INTEGER PRIMARY KEY, quando TEXT NOT NULL, usuario TEXT, acao TEXT NOT NULL, detalhe TEXT);
+    id INTEGER PRIMARY KEY, quando TEXT NOT NULL, usuario TEXT, acao TEXT NOT NULL, detalhe TEXT,
+    obra TEXT);
 CREATE TABLE IF NOT EXISTS controle (id INTEGER PRIMARY KEY CHECK (id = 1), versao INTEGER NOT NULL);
 INSERT INTO controle (id, versao) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
 """
@@ -165,20 +174,21 @@ class Banco:
         """Versão global dos dados, compartilhada entre instâncias (fica no banco)."""
         return self.um("SELECT versao FROM controle WHERE id = 1")["versao"]
 
-    # ------------------------------------------------------------------ parâmetros
-    def parametro(self, chave: str, padrao=None):
-        linha = self.um("SELECT valor FROM parametros WHERE chave = ?", chave)
+    # ------------------------------------------------------------------ parâmetros (por obra)
+    def parametro(self, obra: str, chave: str, padrao=None):
+        linha = self.um("SELECT valor FROM parametros WHERE obra = ? AND chave = ?", obra, chave)
         return json.loads(linha["valor"]) if linha else padrao
 
-    def salvar_parametro(self, chave: str, valor) -> None:
+    def salvar_parametro(self, obra: str, chave: str, valor) -> None:
         with self.transacao() as con:
-            con.execute("INSERT INTO parametros (chave, valor) VALUES (?, ?) "
-                        "ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor",
-                        (chave, para_json(valor)))
+            con.execute("INSERT INTO parametros (obra, chave, valor) VALUES (?, ?, ?) "
+                        "ON CONFLICT (obra, chave) DO UPDATE SET valor = excluded.valor",
+                        (obra, chave, para_json(valor)))
 
-    def registrar(self, con, usuario: str | None, acao: str, detalhe=None) -> None:
-        con.execute("INSERT INTO historico (quando, usuario, acao, detalhe) VALUES (?, ?, ?, ?)",
-                    (agora(), usuario, acao, para_json(detalhe) if detalhe is not None else None))
+    def registrar(self, con, usuario: str | None, acao: str, detalhe=None, obra: str | None = None) -> None:
+        """Histórico de ações; `obra` vazio = ação global (usuários, permissões, cadastro de obras)."""
+        con.execute("INSERT INTO historico (quando, usuario, acao, detalhe, obra) VALUES (?, ?, ?, ?, ?)",
+                    (agora(), usuario, acao, para_json(detalhe) if detalhe is not None else None, obra))
 
 
 class _Executor:

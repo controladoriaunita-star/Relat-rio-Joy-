@@ -1,5 +1,5 @@
 // Aba Dashboards: exposição de caixa (oculta, ver MOSTRAR_EXPOSICAO), gasto × projetado, recebimentos, custos por rubrica,
-// setores que mais gastaram e acerto da projeção. Os números vêm de /api/dashboards, com as
+// setores que mais gastaram e acerto da projeção. Os números vêm de /obra/dashboards, com as
 // mesmas definições do Resumo, do Painel e da Projeção.
 import { api, carregando, esc, fmt, montarGrafico } from '../util.js';
 
@@ -293,7 +293,7 @@ function cartaoAcerto(d) {
 // ------------------------------------------------------------------ tela
 export async function render(el, ctx) {
   el.innerHTML = carregando(10);
-  const d = await api(`/api/dashboards?data=${ctx.dataBase}`);
+  const d = await api(`/obra/dashboards?data=${ctx.dataBase}`);
   const desenhar = () => {
     el.innerHTML = `<div class="fade">
       <div class="cabecalho"><div>

@@ -1,4 +1,7 @@
-"""Leitura das planilhas de origem no SharePoint via Microsoft Graph (client credentials)."""
+"""Leitura das planilhas de origem no SharePoint via Microsoft Graph (client credentials).
+
+Um cliente atende todas as obras: o token é do app; o arquivo (item id) vem da obra.
+"""
 from __future__ import annotations
 
 import base64
@@ -27,7 +30,7 @@ class ClienteGraph:
     @staticmethod
     def configurado() -> bool:
         return all([config.GRAPH_TENANT_ID, config.GRAPH_CLIENT_ID, config.GRAPH_CLIENT_SECRET,
-                    config.GRAPH_DRIVE_ID, config.GRAPH_ITEM_ID])
+                    config.GRAPH_DRIVE_ID])
 
     def _obter_token(self) -> str:
         if self._token and time.time() < self._expira - 60:
@@ -50,24 +53,27 @@ class ClienteGraph:
         carga += "=" * (-len(carga) % 4)
         return json.loads(base64.urlsafe_b64decode(carga)).get("roles") or []
 
-    def _get(self, caminho: str, timeout: int = 120) -> requests.Response:
-        url = URL_ITEM.format(drive=config.GRAPH_DRIVE_ID, item=config.GRAPH_ITEM_ID) + caminho
+    def _get(self, item: str, caminho: str, timeout: int = 120) -> requests.Response:
+        if not item:
+            raise ErroGraph("A obra não tem arquivo do SharePoint configurado (API's › Obras).")
+        url = URL_ITEM.format(drive=config.GRAPH_DRIVE_ID, item=item) + caminho
         return self._sessao.get(url, headers={"Authorization": f"Bearer {self._obter_token()}"}, timeout=timeout)
 
-    def _diagnostico_404(self, aba: str) -> str:
+    def _diagnostico_404(self, item: str, aba: str) -> str:
         """Diz se o problema é o arquivo (GRAPH_ITEM_ID) ou a aba, para o erro não ficar genérico."""
-        arquivo = self._get("?$select=name", timeout=30)
+        arquivo = self._get(item, "?$select=name", timeout=30)
         if arquivo.status_code != 200:
-            return "Arquivo não encontrado no SharePoint: confira GRAPH_DRIVE_ID e GRAPH_ITEM_ID."
-        abas = self._get("/workbook/worksheets?$select=name", timeout=60)
+            return "Arquivo não encontrado no SharePoint: confira o arquivo da obra (API's › Obras)."
+        abas = self._get(item, "/workbook/worksheets?$select=name", timeout=60)
         nomes = [w["name"] for w in abas.json().get("value", [])] if abas.status_code == 200 else []
         return (f"A aba '{aba}' não existe no arquivo configurado ({arquivo.json().get('name')}). "
                 + (f"Abas do arquivo: {', '.join(nomes)}. " if nomes else "")
-                + "Confira GRAPH_ITEM_ID.")
+                + "Confira o arquivo da obra (API's › Obras).")
 
-    def ler_aba(self, aba: str) -> list[list]:
-        """Valores do usedRange da aba (primeira linha = cabeçalho)."""
-        resposta = self._get(f"/workbook/worksheets('{quote(aba)}')/usedRange(valuesOnly=true)?$select=values")
+    def ler_aba(self, item: str, aba: str) -> list[list]:
+        """Valores do usedRange da aba do arquivo `item` (primeira linha = cabeçalho)."""
+        literal = quote(aba.replace("'", "''"))            # OData: apóstrofo dobrado (ex.: Custos_NN's)
+        resposta = self._get(item, f"/workbook/worksheets('{literal}')/usedRange(valuesOnly=true)?$select=values")
         if resposta.status_code == 200:
             return resposta.json().get("values", [])
         if resposta.status_code in (401, 403):
@@ -77,5 +83,5 @@ class ClienteGraph:
                                "(Files.Read.All ou Sites.Read.All com consentimento de administrador)."
                                if sem_permissao else "Verifique o acesso do aplicativo ao site."))
         if resposta.status_code == 404:
-            raise ErroGraph(self._diagnostico_404(aba)[:400])
+            raise ErroGraph(self._diagnostico_404(item, aba)[:400])
         raise ErroGraph(f"Graph respondeu {resposta.status_code}: {resposta.text[:300]}")

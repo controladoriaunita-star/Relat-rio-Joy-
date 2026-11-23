@@ -45,7 +45,6 @@ from datetime import date
 from ..catalogo import (CUSTOS, DESPESAS, IMPOSTO_RECEITA_ALIQUOTA, IMPOSTO_RECEITA_EVE,
                         INICIO_LINHA_DO_TEMPO, MESES_LINHA_DO_TEMPO, PREMISSAS_DESEMBOLSO,
                         RECEITAS_EVE, TIR_EVE, Premissas)
-from ..config import CLIENTE_INVESTIDOR, EMPRESA_SPE, HISTORICO_APORTE_INVESTIDOR
 from ..excel_funcoes import arredondar, eomonth, meses_entre, texto_igual, texto_mes
 from .base import Base, somar
 from .resumo import saldo_fim_de_mes
@@ -150,7 +149,7 @@ class _Painel:
         for r, (rotulo, eve) in RECEITAS_EVE.items():
             linha = Linha(r, rotulo, "receita", X=eve, tl=_zeros())
             if r == LINHA_CLIENTES:            # P8: Recebidas de clientes que não são o investidor
-                linha.tl = self.por_mes(b.recebidas, lambda x: x.cliente != CLIENTE_INVESTIDOR)
+                linha.tl = self.por_mes(b.recebidas, lambda x: x.cliente != b.cliente_investidor)
             elif r == LINHA_RENDIMENTOS:       # P5: Controle Entradas pelo mês da data
                 linha.tl = self.por_mes(b.filtrar("entradas", "classificacao", rotulo))
             self.fechar(linha)
@@ -235,10 +234,10 @@ class _Painel:
     def socios(self) -> None:
         b = self.base
         transferencias_para_spe = [t for t in b.transferencias
-                                   if t.empresa != EMPRESA_SPE and t.empresa_credito == EMPRESA_SPE]
+                                   if t.empresa != b.empresa_spe and t.empresa_credito == b.empresa_spe]
         transferencias_da_spe = [t for t in b.transferencias
-                                 if t.empresa == EMPRESA_SPE and t.empresa_credito != EMPRESA_SPE]
-        entradas_investidor = lambda e: texto_igual(e.historico, HISTORICO_APORTE_INVESTIDOR)
+                                 if t.empresa == b.empresa_spe and t.empresa_credito != b.empresa_spe]
+        entradas_investidor = lambda e: texto_igual(e.historico, b.historico_aporte_investidor)
         mais = lambda *listas: [sum(v) for v in zip(*listas)]
         menos = lambda tl: [0.0 - v for v in tl]
 
@@ -247,7 +246,7 @@ class _Painel:
         investidor = [
             Linha(106, "Aporte Investidor", "socio", tl=mais(
                 self.por_mes(b.filtrar("entradas", "classificacao", "Aporte"), entradas_investidor),
-                self.por_mes(b.recebidas, lambda x: x.cliente == CLIENTE_INVESTIDOR))),
+                self.por_mes(b.recebidas, lambda x: x.cliente == b.cliente_investidor))),
             Linha(107, "Retorno de Aporte Investidor", "socio",
                   tl=menos(self.por_mes(b.filtrar("saidas", "classificacao", "Retorno de Aporte")))),
             Linha(108, "Remuneração Investidor", "socio", tl=_zeros()),

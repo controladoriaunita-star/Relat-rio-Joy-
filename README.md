@@ -1,13 +1,27 @@
-# Relatório de Aporte · Joy+ Evans
+# Relatório de Aporte · Joy+
 
-Ferramenta web de análise de custos e projeção de aportes. Substitui as abas **Resumo** e
-**Painel** do `Controle - Joy+ Evans.xlsm`, reproduzindo as fórmulas da planilha, e traz a aba
-**Projeção**, onde cada setor lança as suas projeções mensais.
+Ferramenta web de análise de custos e projeção de aportes das obras Joy+ (hoje Evans e Berrini).
+Substitui as abas **Resumo** e **Painel** da planilha de controle de cada obra, reproduzindo as
+fórmulas, e traz a aba **Projeção**, onde cada setor lança as suas projeções mensais.
+Um só app: as obras são módulos escolhidos no seletor do topo (ver seção 0).
 
 **Arquitetura:** front estático (`public/`) e API FastAPI (`api/index.py`) na **Vercel**;
 banco Postgres e login no **Supabase**; dados de origem lidos do SharePoint pelo **Microsoft Graph**.
 
 ---
+
+## 0. Obras
+
+- **Comum a todas as obras:** fórmulas (motor), telas, login, usuários, papéis e permissões.
+- **De cada obra** (`backend/app/obras.py`, tabela `obras`): arquivo de dados no SharePoint (item id na
+  pasta `06 - API`, mesmas abas do arquivo da Evans), empresa SPE, cliente investidor e histórico do
+  aporte usados pelas fórmulas, planilha de controle local e, só se diferirem do padrão, os nomes das abas.
+- **Dados por obra:** parâmetros (premissas e viabilidade), DePara, cargas, setores, linhas e projeções
+  (coluna `obra`). A API de dados fica em `/api/obras/{obra}/...`; a URL do app é `#<obra>/<aba>`.
+- **Obra nova, sem código:** API's › Obras › Nova obra (permissão `obras.gerenciar`, papel admin).
+  Informe o código, o nome, a empresa SPE e o item id do arquivo `BD´s_JOY_<OBRA>` e depois use
+  "Atualizar do SharePoint". A obra nasce com os setores e linhas padrão.
+- **Atualização pelo SharePoint:** o app atualiza uma fonte por requisição (limite de 60 s da Vercel).
 
 ## 1. Deploy (Supabase + Vercel)
 
@@ -24,7 +38,7 @@ banco Postgres e login no **Supabase**; dados de origem lidos do SharePoint pelo
 5. **Carga inicial** (na sua máquina, com `DATABASE_URL` e as chaves do Supabase no `.env`):
    ```bash
    python -m pip install -r requirements-dev.txt
-   python -m backend.app.migrar planilha
+   python -m backend.app.migrar planilha --obra evans      # carga a partir da planilha de controle
    python -m backend.app.migrar admin seu.email@unitaengenharia.com.br "Seu Nome"
    ```
    O administrador recebe um convite por e-mail para definir a senha. Os demais usuários

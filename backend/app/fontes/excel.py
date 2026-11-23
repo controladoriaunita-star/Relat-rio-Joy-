@@ -12,6 +12,7 @@ from pathlib import Path
 
 import openpyxl
 
+from ..catalogo import DESPESAS, CUSTOS
 from ..excel_funcoes import como_data, como_numero
 from ..motor.base import LinhaProjecao
 from .definicoes import FONTES
@@ -22,6 +23,7 @@ class PlanilhaExcel:
     tabelas: dict[str, list[list]] = field(default_factory=dict)     # código da fonte → valores
     depara: dict[str, list[tuple]] = field(default_factory=dict)     # código → [(concat, classif)]
     projecao: list[LinhaProjecao] = field(default_factory=list)
+    viabilidade: dict[str, float] = field(default_factory=dict)     # Resumo coluna D, por rubrica
     ultima_atualizacao: datetime | None = None
     livro: object = None                                              # workbook (valores salvos)
 
@@ -53,6 +55,10 @@ def ler_planilha(caminho: Path) -> PlanilhaExcel:
     i = {nome: cab.index(nome) for nome in ("Descrição", "Datas", "Tipo", "Valor")}
     planilha.projecao = [LinhaProjecao(l[i["Descrição"]], como_data(l[i["Datas"]]),
                                        l[i["Tipo"]], como_numero(l[i["Valor"]])) for l in linhas]
+
+    resumo = livro["Resumo"]
+    planilha.viabilidade = {rubrica: como_numero(resumo[f"D{linha}"].value)
+                            for rubrica, linha, _, _ in DESPESAS + CUSTOS}
 
     _, *linhas = _tabela_por_nome(livro, "Ultima_Atualização")
     planilha.ultima_atualizacao = linhas[0][0] if linhas else None

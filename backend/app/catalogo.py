@@ -177,10 +177,11 @@ PERMISSOES = {
     "premissas.editar": "Editar premissas do aporte e viabilidade",
     "setores.gerenciar": "Criar e alterar setores e linhas de projeção",
     "usuarios.gerenciar": "Gerenciar usuários, papéis e permissões dentro do app",
+    "obras.gerenciar": "Cadastrar obras e alterar a configuração de cada uma",
 }
 PERMISSOES_PADRAO = {                       # concedidas quando o papel é criado
     PAPEL_ADMIN: list(PERMISSOES),
-    "diretor": [p for p in PERMISSOES if p not in ("setores.gerenciar", "usuarios.gerenciar")],
+    "diretor": [p for p in PERMISSOES if p not in ("setores.gerenciar", "usuarios.gerenciar", "obras.gerenciar")],
 }
 PERMISSOES_SETOR = ["projecao.ver"]         # papel de setor novo
 # Abas ainda em construção: aparecem como "Em breve" para todos, menos para o papel admin.

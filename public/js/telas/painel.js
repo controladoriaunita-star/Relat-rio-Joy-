@@ -136,7 +136,7 @@ function kpiConciliacao(c) {
 
 export async function render(el, { dataBase }) {
   el.innerHTML = carregando(12);
-  const dados = await api(`/api/painel?data=${dataBase}`);
+  const dados = await api(`/obra/painel?data=${dataBase}`);
   const linhas = Object.fromEntries(dados.linhas.map((l) => [l.linha_excel, l]));
   const anos = [...new Set(dados.meses.map((m) => m.slice(0, 4)))];
   anoSelecionado ??= dados.datas.corte.slice(0, 4);

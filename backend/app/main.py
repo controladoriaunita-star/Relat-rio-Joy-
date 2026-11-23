@@ -1,4 +1,4 @@
-"""API REST do Relatório de Aporte Joy+ Evans.
+"""API REST do Relatório de Aporte Joy+ (várias obras: rotas de dados em /api/obras/{obra}/...).
 
 Produção (Vercel): api/index.py expõe `app = criar_app()`; os arquivos de public/
 são servidos pela CDN da Vercel e o banco é o Postgres do Supabase.
@@ -10,7 +10,7 @@ import dataclasses
 import os
 from datetime import date
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,7 +19,8 @@ from pydantic import BaseModel
 from . import auth, config
 from .catalogo import ABAS_EM_BREVE, PAPEL_ADMIN
 from .db import Banco, ErroIntegridade, hoje
-from .servicos import ErroNegocio, Servico
+from .fontes.definicoes import FONTES
+from .servicos import ErroNegocio, ObraNaoEncontrada, Servico, ServicoObra
 
 
 class ItemProjecao(BaseModel):
@@ -87,7 +88,7 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
         verificador = verificador or auth.criar_verificador(banco)
     local = isinstance(verificador, auth.VerificadorLocal)
 
-    app = FastAPI(title="Relatório de Aporte · Joy+ Evans", docs_url="/api/docs",
+    app = FastAPI(title="Relatório de Aporte · Joy+", docs_url="/api/docs",
                   openapi_url="/api/openapi.json", redoc_url=None)
     app.state.servico = servico
 
@@ -102,6 +103,10 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
     @app.exception_handler(ErroNegocio)
     async def _erro_negocio(_: Request, erro: ErroNegocio):
         return JSONResponse({"detail": str(erro)}, status_code=422)
+
+    @app.exception_handler(ObraNaoEncontrada)
+    async def _obra_nao_encontrada(_: Request, erro: ObraNaoEncontrada):
+        return JSONResponse({"detail": str(erro)}, status_code=404)
 
     @app.exception_handler(ErroIntegridade)
     async def _erro_integridade(_: Request, erro: ErroIntegridade):
@@ -150,92 +155,127 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
         return {**usuario, "permissoes": permissoes, "login_ativo": login_ativo, "em_breve": em_breve,
                 "perfil_nome": servico.perfis().get(usuario["perfil"], usuario["perfil"])}
 
-    # ------------------------------------------------------------------ relatórios
-    @app.get("/api/resumo")
-    def resumo(hoje: date = Depends(data_base), _: dict = Depends(exigir("resumo.ver"))):
-        return servico.calcular("resumo", hoje)
+    # ------------------------------------------------------------------ obras (globais)
+    @app.get("/api/obras")
+    def listar_obras(usuario: dict = Depends(usuario_atual)):
+        """Obras ativas para todos; quem gerencia obras vê também as inativas e a configuração."""
+        gestor = auth.permissoes(usuario)["obras.gerenciar"]
+        if not gestor:
+            return [{"codigo": o.codigo, "nome": o.nome} for o in servico.obras()]
+        return [{**o.como_dict(), "fontes": [{"codigo": f.codigo, "titulo": f.titulo, "aba_padrao": f.aba_graph,
+                                               "aba": o.aba(f)} for f in FONTES]}
+                for o in servico.obras(incluir_inativas=True)]
 
-    @app.get("/api/dashboards")
-    def dashboards(hoje: date = Depends(data_base), _: dict = Depends(exigir("dashboards.ver"))):
-        return servico.dashboards(hoje)
+    @app.post("/api/obras")
+    def salvar_obra(dados: dict, usuario: dict = Depends(exigir("obras.gerenciar"))):
+        return servico.salvar_obra(dados, usuario).como_dict()
 
-    @app.get("/api/aportes")
-    def aportes(hoje: date = Depends(data_base), _: dict = Depends(exigir("resumo.ver"))):
-        return servico.aportes(hoje)
+    # ------------------------------------------------------------------ dados de cada obra
+    obra = APIRouter(prefix="/api/obras/{obra}")
 
-    @app.get("/api/painel")
-    def painel(hoje: date = Depends(data_base), _: dict = Depends(exigir("painel.ver"))):
-        resultado = servico.calcular("painel", hoje)
+    def servico_obra(obra: str) -> ServicoObra:
+        return servico.obra(obra)
+
+    @obra.get("/resumo")
+    def resumo(hoje: date = Depends(data_base), so: ServicoObra = Depends(servico_obra),
+               _: dict = Depends(exigir("resumo.ver"))):
+        return so.calcular("resumo", hoje)
+
+    @obra.get("/dashboards")
+    def dashboards(hoje: date = Depends(data_base), so: ServicoObra = Depends(servico_obra),
+                   _: dict = Depends(exigir("dashboards.ver"))):
+        return so.dashboards(hoje)
+
+    @obra.get("/aportes")
+    def aportes(hoje: date = Depends(data_base), so: ServicoObra = Depends(servico_obra),
+                _: dict = Depends(exigir("resumo.ver"))):
+        return so.aportes(hoje)
+
+    @obra.get("/painel")
+    def painel(hoje: date = Depends(data_base), so: ServicoObra = Depends(servico_obra),
+               _: dict = Depends(exigir("painel.ver"))):
+        resultado = so.calcular("painel", hoje)
         return {**resultado, "linhas": [dataclasses.asdict(l) for l in resultado["linhas"]]}
 
-    # ------------------------------------------------------------------ projeção
-    @app.get("/api/projecao")
-    def projecao(hoje: date = Depends(data_base), usuario: dict = Depends(exigir("projecao.ver"))):
-        return servico.grade_projecao(usuario, hoje)
+    @obra.get("/projecao")
+    def projecao(hoje: date = Depends(data_base), so: ServicoObra = Depends(servico_obra),
+                 usuario: dict = Depends(exigir("projecao.ver"))):
+        return so.grade_projecao(usuario, hoje)
 
-    @app.get("/api/projecao/comparativo")
+    @obra.get("/projecao/comparativo")
     def comparativo(mes: date | None = None, setor: str | None = None, hoje: date = Depends(data_base),
-                    _: dict = Depends(exigir("projecao.ver"))):
-        return servico.comparativo_projecao(mes or hoje, setor)
+                    so: ServicoObra = Depends(servico_obra), _: dict = Depends(exigir("projecao.ver"))):
+        return so.comparativo_projecao(mes or hoje, setor)
 
-    @app.put("/api/projecao")
+    @obra.put("/projecao")
     def salvar_projecao(itens: list[ItemProjecao], hoje: date = Depends(data_base),
-                        usuario: dict = Depends(exigir("projecao.ver"))):
-        return {"salvos": servico.salvar_projecao([jsonable_encoder(i) for i in itens], usuario, hoje)}
+                        so: ServicoObra = Depends(servico_obra), usuario: dict = Depends(exigir("projecao.ver"))):
+        return {"salvos": so.salvar_projecao([jsonable_encoder(i) for i in itens], usuario, hoje)}
 
-    # ------------------------------------------------------------------ parâmetros
-    @app.get("/api/parametros")
-    def parametros(_: dict = Depends(exigir("resumo.ver"))):
-        return {"premissas": servico.premissas().como_dict(), "viabilidade": servico.viabilidade()}
+    @obra.get("/parametros")
+    def parametros(so: ServicoObra = Depends(servico_obra), _: dict = Depends(exigir("resumo.ver"))):
+        return {"premissas": so.premissas().como_dict(), "viabilidade": so.viabilidade()}
 
-    @app.put("/api/parametros/premissas")
-    def salvar_premissas(dados: dict, usuario: dict = Depends(exigir("premissas.editar"))):
-        return servico.salvar_premissas(dados, usuario).como_dict()
+    @obra.put("/parametros/premissas")
+    def salvar_premissas(dados: dict, so: ServicoObra = Depends(servico_obra),
+                         usuario: dict = Depends(exigir("premissas.editar"))):
+        return so.salvar_premissas(dados, usuario).como_dict()
 
-    @app.put("/api/parametros/cronograma")
-    def salvar_cronograma(dados: Cronograma, usuario: dict = Depends(exigir("premissas.editar"))):
-        return servico.salvar_cronograma(dados.mes, [p.model_dump() for p in dados.parcelas], usuario).como_dict()
+    @obra.put("/parametros/cronograma")
+    def salvar_cronograma(dados: Cronograma, so: ServicoObra = Depends(servico_obra),
+                          usuario: dict = Depends(exigir("premissas.editar"))):
+        return so.salvar_cronograma(dados.mes, [p.model_dump() for p in dados.parcelas], usuario).como_dict()
 
-    @app.put("/api/parametros/viabilidade")
-    def salvar_viabilidade(dados: dict[str, float], usuario: dict = Depends(exigir("premissas.editar"))):
-        return servico.salvar_viabilidade(dados, usuario)
+    @obra.put("/parametros/viabilidade")
+    def salvar_viabilidade(dados: dict[str, float], so: ServicoObra = Depends(servico_obra),
+                           usuario: dict = Depends(exigir("premissas.editar"))):
+        return so.salvar_viabilidade(dados, usuario)
 
-    # ------------------------------------------------------------------ fontes / APIs
-    @app.get("/api/fontes")
-    def fontes(_: dict = Depends(exigir("apis.ver"))):
-        return servico.status_fontes()
+    @obra.get("/fontes")
+    def fontes(so: ServicoObra = Depends(servico_obra), _: dict = Depends(exigir("apis.ver"))):
+        return so.status_fontes()
 
-    @app.post("/api/fontes/atualizar")
-    def atualizar(pedido: PedidoAtualizacao, usuario: dict = Depends(exigir("fontes.atualizar"))):
-        return servico.atualizar_fontes(pedido.origem, usuario, pedido.fontes)
+    @obra.post("/fontes/atualizar")
+    def atualizar(pedido: PedidoAtualizacao, so: ServicoObra = Depends(servico_obra),
+                  usuario: dict = Depends(exigir("fontes.atualizar"))):
+        return so.atualizar_fontes(pedido.origem, usuario, pedido.fontes)
 
-    @app.get("/api/fontes/{codigo}/pendentes")
-    def pendentes(codigo: str, _: dict = Depends(exigir("apis.ver"))):
-        return servico.pendentes(codigo)
+    @obra.get("/fontes/{codigo}/pendentes")
+    def pendentes(codigo: str, so: ServicoObra = Depends(servico_obra), _: dict = Depends(exigir("apis.ver"))):
+        return so.pendentes(codigo)
 
-    @app.post("/api/fontes/{codigo}/classificar")
-    def classificar(codigo: str, dados: Classificacao, usuario: dict = Depends(exigir("fontes.classificar"))):
-        servico.classificar(codigo, dados.concat, dados.classificacao, usuario)
+    @obra.post("/fontes/{codigo}/classificar")
+    def classificar(codigo: str, dados: Classificacao, so: ServicoObra = Depends(servico_obra),
+                    usuario: dict = Depends(exigir("fontes.classificar"))):
+        so.classificar(codigo, dados.concat, dados.classificacao, usuario)
         return {"ok": True}
 
-    # ------------------------------------------------------------------ saldos bancários
-    @app.get("/api/saldos")
-    def saldos(_: dict = Depends(exigir("apis.ver"))):
-        return servico.listar_saldos()
+    @obra.get("/saldos")
+    def saldos(so: ServicoObra = Depends(servico_obra), _: dict = Depends(exigir("apis.ver"))):
+        return so.listar_saldos()
 
-    # ------------------------------------------------------------------ administração
-    @app.get("/api/setores")
-    def setores(_: dict = Depends(usuario_atual)):
-        return servico.setores(incluir_inativos=True)
+    @obra.get("/setores")
+    def setores(so: ServicoObra = Depends(servico_obra), _: dict = Depends(usuario_atual)):
+        return so.setores(incluir_inativos=True)
 
-    @app.post("/api/setores")
-    def salvar_setor(dados: dict, usuario: dict = Depends(exigir("setores.gerenciar"))):
-        return {"id": servico.salvar_setor(dados, usuario)}
+    @obra.post("/setores")
+    def salvar_setor(dados: dict, so: ServicoObra = Depends(servico_obra),
+                     usuario: dict = Depends(exigir("setores.gerenciar"))):
+        return {"id": so.salvar_setor(dados, usuario)}
 
-    @app.post("/api/linhas")
-    def salvar_linha(dados: dict, usuario: dict = Depends(exigir("setores.gerenciar"))):
-        return {"id": servico.salvar_linha(dados, usuario)}
+    @obra.post("/linhas")
+    def salvar_linha(dados: dict, so: ServicoObra = Depends(servico_obra),
+                     usuario: dict = Depends(exigir("setores.gerenciar"))):
+        return {"id": so.salvar_linha(dados, usuario)}
 
+    @obra.get("/historico")
+    def historico(limite: int = 200, so: ServicoObra = Depends(servico_obra),
+                  _: dict = Depends(exigir("apis.ver"))):
+        return servico.historico(so.codigo, limite)
+
+    app.include_router(obra)
+
+    # ------------------------------------------------------------------ usuários e permissões (globais)
     @app.get("/api/usuarios", dependencies=[Depends(exigir_login_ativo)])
     def usuarios(_: dict = Depends(exigir("usuarios.gerenciar"))):
         return {"usuarios": servico.listar_usuarios(), "perfis": servico.perfis()}
@@ -257,10 +297,6 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
     def alterar_permissao(dados: Concessao, usuario: dict = Depends(exigir("usuarios.gerenciar"))):
         servico.alterar_permissao(dados.papel, dados.permissao, dados.concedida, usuario)
         return {"ok": True}
-
-    @app.get("/api/historico")
-    def historico(limite: int = 200, _: dict = Depends(exigir("apis.ver"))):
-        return banco.todos("SELECT * FROM historico ORDER BY id DESC LIMIT ?", min(limite, 1000))
 
     # ------------------------------------------------------------------ interface (uso local)
     if config.PASTA_WEB.exists() and not os.environ.get("VERCEL"):

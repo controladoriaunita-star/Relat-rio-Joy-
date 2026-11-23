@@ -37,6 +37,14 @@ header.app .data-base input {
   height: 32px; border-radius: var(--r-control); border: 1px solid var(--border);
   background: #fff; color: var(--text); padding: 0 8px;
 }
+/* Obra ativa: contexto de todas as abas */
+header.app .seletor-obra { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+header.app .seletor-obra select {
+  height: 34px; border-radius: var(--r-control); border: 1px solid var(--color-primary);
+  background: var(--color-primary-soft); color: var(--color-primary); font-weight: 700;
+  padding: 0 10px; max-width: 220px; cursor: pointer;
+}
+header.app .obra-unica { font-weight: 700; color: var(--color-primary); white-space: nowrap; }
 header.app .troca-perfil { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
 header.app .troca-perfil select {
   height: 32px; border-radius: var(--r-control); border: 1px solid var(--color-primary);
@@ -415,7 +423,7 @@ main { padding: 24px var(--gutter) 96px; }
   header.app .direita { gap: 8px; }
 }
 @media (max-width: 640px) {
-  header.app .u, header.app .data-base span, header.app .troca-perfil span { display: none; }
+  header.app .u, header.app .data-base span, header.app .troca-perfil span, header.app .seletor-obra span { display: none; }
 }
 @media (max-width: 760px) {
   main { padding: 20px 16px 80px; }
@@ -431,7 +439,7 @@ main { padding: 24px var(--gutter) 96px; }
    Aporte à direita, sem o menu do app, com as cores dos destaques e numeração de páginas. */
 @page {
   size: A4 landscape; margin: 9mm 9mm 11mm;
-  @bottom-left { content: "Relatório de Aporte · Joy+ Evans"; font: 7.5px Inter, sans-serif; color: #8a8797; }
+  @bottom-left { content: "Relatório de Aporte · Joy+"; font: 7.5px Inter, sans-serif; color: #8a8797; }
   @bottom-right { content: "Página " counter(page) " de " counter(pages); font: 7.5px Inter, sans-serif; color: #8a8797; }
 }
 @media print {

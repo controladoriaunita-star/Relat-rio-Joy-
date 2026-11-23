@@ -45,7 +45,13 @@ export class ErroApi extends Error {
   constructor(status, mensagem) { super(mensagem); this.status = status; }
 }
 
+// Obra ativa: as rotas de dados são escritas como "/obra/<rota>" e viram /api/obras/<obra>/<rota>.
+let obraAtual = null;
+export const definirObra = (codigo) => { obraAtual = codigo; };
+export const obraAtiva = () => obraAtual;
+
 export async function api(caminho, { metodo = 'GET', corpo } = {}) {
+  if (caminho.startsWith('/obra/')) caminho = `/api/obras/${encodeURIComponent(obraAtual)}/${caminho.slice(6)}`;
   const cabecalhos = corpo === undefined ? {} : { 'Content-Type': 'application/json' };
   const acesso = await token();
   if (acesso) cabecalhos.Authorization = `Bearer ${acesso}`;
