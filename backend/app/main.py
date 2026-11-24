@@ -170,6 +170,21 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
     def salvar_obra(dados: dict, usuario: dict = Depends(exigir("obras.gerenciar"))):
         return servico.salvar_obra(dados, usuario).como_dict()
 
+    @app.get("/api/inicio")
+    def inicio(hoje: date = Depends(data_base), usuario: dict = Depends(usuario_atual)):
+        """Cards da tela inicial: um por obra ativa. Todo usuário escolhe a obra aqui; os números
+        financeiros só vão para quem pode ver o Resumo."""
+        cards = servico.painel_inicio(hoje)
+        if auth.permissoes(usuario)["resumo.ver"]:
+            return cards
+        publicos = ("codigo", "nome", "empresa_spe", "arquivo", "com_dados", "ultima_atualizacao", "erro")
+        return [{k: c[k] for k in publicos if k in c} for c in cards]
+
+    @app.get("/api/sharepoint/arquivos")
+    def arquivos_sharepoint(_: dict = Depends(exigir("obras.gerenciar"))):
+        """Planilhas da pasta de dados das obras, para escolher o arquivo no cadastro."""
+        return servico.arquivos_sharepoint()
+
     # ------------------------------------------------------------------ dados de cada obra
     obra = APIRouter(prefix="/api/obras/{obra}")
 

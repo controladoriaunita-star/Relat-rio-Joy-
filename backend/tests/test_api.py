@@ -32,6 +32,10 @@ class GraphFalso:
     def configurado():
         return True
 
+    def listar_pasta(self, pasta):
+        return [{"id": "ITEM-EVANS", "nome": "BD´s_JOY_EVANS.xlsx", "alterado_em": "2026-11-03T14:17:38Z"},
+                {"id": "ITEM-NOVO", "nome": "BD´s_JOY_NOVA.xlsx", "alterado_em": "2026-11-20T10:00:00Z"}]
+
     def ler_aba(self, item, aba):
         raise ErroGraph("Acesso negado pelo SharePoint.")
 
@@ -347,7 +351,7 @@ def test_respostas_da_api_nao_ficam_em_cache(ambiente):
 
 def test_comparativo_projetado_incorrido(ambiente):
     c = cliente(ambiente, "ana.mkt")          # setor consulta qualquer setor (só leitura)
-    d = c.get(f"/api/obras/evans/projecao/comparativo?mes=2026-09-30&setor=proj").json()
+    d = c.get("/api/obras/evans/projecao/comparativo?mes=2026-09-30&setor=proj").json()
     rubricas = {p["rubrica"] for p in d["projetado"]}
     assert rubricas == {"Projetos"} and all(i["rubrica"] in rubricas for i in d["incorrido"])
     assert all(i["data"].startswith("2026-09") for i in d["incorrido"])
@@ -429,8 +433,8 @@ def test_obra_inexistente(ambiente):
 
 def test_dados_isolados_por_obra(ambiente, com_berrini):
     c = cliente(ambiente, "dora.dir")
-    evans = c.get(f"/api/obras/evans/fontes").json()["fontes"]
-    berrini = c.get(f"/api/obras/berrini/fontes").json()["fontes"]
+    evans = c.get("/api/obras/evans/fontes").json()["fontes"]
+    berrini = c.get("/api/obras/berrini/fontes").json()["fontes"]
     custos = lambda fontes: next(f for f in fontes if f["codigo"] == "custos_spe")
     assert custos(evans)["registros"] == 195 and custos(evans)["pendentes"] == 0
     # Na planilha da Berrini o DePara ainda está #N/A: tudo fica pendente, nada é "classificado como #N/A".
@@ -469,3 +473,33 @@ def test_cadastro_de_obra(ambiente):
     assert {s["codigo"] for s in setores} == {"mkt", "proj", "inc"}            # setores padrão criados
     assert adm.post("/api/obras", json={"codigo": "Inválido!", "nome": "X"}).status_code == 422
     assert cliente(ambiente, "dora.dir").post("/api/obras", json={"codigo": "z1", "nome": "Z"}).status_code == 403
+
+
+def test_tela_inicial_um_card_por_obra(ambiente):
+    setor = cliente(ambiente, "ana.mkt").get(f"/api/inicio?data={HOJE}").json()
+    assert {c["codigo"] for c in setor} >= {"evans", "berrini"}
+    assert all("aporte_total" not in c for c in setor)          # setor escolhe a obra, sem números do Resumo
+    cards = cliente(ambiente, "dora.dir").get(f"/api/inicio?data={HOJE}").json()
+    evans = next(c for c in cards if c["codigo"] == "evans")
+    resumo = cliente(ambiente, "dora.dir").get(f"/api/obras/evans/resumo?data={HOJE}").json()
+    assert math.isclose(evans["aporte_total"], resumo["aporte_mes"]["aporte_total"])
+    assert evans["com_dados"] and evans["pendentes"] == 0 and "erro" not in evans
+
+
+def test_cadastro_completo_com_viabilidade_e_linhas_copiadas(ambiente):
+    adm = cliente(ambiente, "edu.adm")
+    arquivos = adm.get("/api/sharepoint/arquivos").json()
+    assert [a["nome"] for a in arquivos] == ["BD´s_JOY_EVANS.xlsx", "BD´s_JOY_NOVA.xlsx"]
+    assert cliente(ambiente, "dora.dir").get("/api/sharepoint/arquivos").status_code == 403
+    r = adm.post("/api/obras", json={"codigo": "brooklin", "nome": "Brooklin", "empresa_spe": 80,
+                                     "graph_item_id": "ITEM-NOVO", "linhas_de": "evans",
+                                     "viabilidade": {"Terreno": 1_000_000, "Projetos": 250_000}})
+    assert r.status_code == 200
+    viab = adm.get("/api/obras/brooklin/parametros").json()["viabilidade"]
+    assert viab["Terreno"] == 1_000_000 and viab["Projetos"] == 250_000
+    assert viab["Custo da Construção"] == 0                    # não herda a viabilidade da Evans
+    nomes = lambda obra: sorted((s["codigo"], l["nome"]) for s in adm.get(f"/api/obras/{obra}/setores").json()
+                                for l in s["linhas"])
+    assert nomes("brooklin") == nomes("evans")                 # linhas copiadas da Evans
+    assert any(c["codigo"] == "brooklin" for c in adm.get(f"/api/inicio?data={HOJE}").json())
+    assert adm.post("/api/obras", json={"codigo": "x2", "nome": "X", "linhas_de": "nao-existe"}).status_code == 422

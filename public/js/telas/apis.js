@@ -186,61 +186,6 @@ async function permissoes(el, ctx) {
   }));
 }
 
-async function obras(el) {
-  const lista = await api('/api/obras');
-  const fontesPadrao = lista[0]?.fontes || [];
-  el.innerHTML = `<div class="alert a-info" style="margin-bottom:16px"><b>Obras</b>
-      <div>Cada obra usa o mesmo fluxo de API da Evans: um arquivo na pasta 06 - API do SharePoint, com as mesmas abas.
-      Fórmulas, telas e usuários são comuns a todas as obras.</div></div>
-    <div class="row-flex" style="margin-bottom:12px"><button class="btn primary" id="nova-obra">Nova obra</button></div>
-    <div class="sheet"><table><thead><tr><th class="first">Obra</th><th style="text-align:left">Código</th><th>Empresa SPE</th>
-      <th>Cliente investidor</th><th style="text-align:left">Arquivo do SharePoint</th><th style="text-align:left">Abas diferentes</th><th>Situação</th><th></th></tr></thead>
-    <tbody>${lista.map((o) => `<tr><td class="first">${esc(o.nome)}</td><td style="text-align:left">${esc(o.codigo)}</td>
-      <td>${o.empresa_spe ?? '—'}</td><td>${o.cliente_investidor ?? '<span class="badge b-warning">definir</span>'}</td>
-      <td style="text-align:left" class="mono">${o.graph_item_id ? esc(o.graph_item_id) : '<span class="badge b-error">sem arquivo</span>'}</td>
-      <td style="text-align:left">${Object.keys(o.abas || {}).length ? Object.entries(o.abas).map(([k, v]) => `${esc(k)} → ${esc(v)}`).join('<br>') : '—'}</td>
-      <td><span class="badge ${o.ativo ? 'b-success' : 'b-neutral'}">${o.ativo ? 'Ativa' : 'Inativa'}</span></td>
-      <td><button class="btn ghost sm" data-editar="${esc(o.codigo)}">Editar</button></td></tr>`).join('')}</tbody></table></div>`;
-
-  const formulario = (o = {}) => {
-    const campo = (nome, rotulo, valor, extra = '') => `<div class="field"><label>${rotulo}</label>
-      <input name="${nome}" value="${esc(valor ?? '')}" ${extra} /></div>`;
-    const abas = fontesPadrao.map((f) => `<div class="field"><label>${esc(f.titulo)}</label>
-      <input name="aba_${f.codigo}" value="${esc((o.abas || {})[f.codigo] || '')}" placeholder="${esc(f.aba_padrao)}" /></div>`).join('');
-    modal({
-      titulo: o.codigo ? `Obra ${o.nome}` : 'Nova obra',
-      conteudo: `<div class="grid" style="margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-          ${campo('codigo', 'Código (na URL e no banco)', o.codigo, o.codigo ? 'disabled' : 'placeholder="ex.: brooklin"')}
-          ${campo('nome', 'Nome', o.nome)}
-          ${campo('empresa_spe', 'Empresa SPE (código UAU)', o.empresa_spe, 'inputmode="numeric"')}
-          ${campo('cliente_investidor', 'Cliente investidor (Recebidas)', o.cliente_investidor, 'inputmode="numeric"')}
-          ${campo('historico_aporte_investidor', 'Histórico do aporte (Controle Entradas)', o.historico_aporte_investidor)}
-          ${campo('graph_item_id', 'Arquivo do SharePoint (item id)', o.graph_item_id)}
-          ${campo('arquivo_excel', 'Planilha de controle local', o.arquivo_excel, 'placeholder="Controle - Joy+ <Obra>.xlsm"')}
-          ${campo('ordem', 'Ordem no seletor', o.ordem ?? 0, 'inputmode="numeric"')}
-          <label class="row-flex muted" style="gap:6px"><input type="checkbox" name="ativo" ${o.ativo === false ? '' : 'checked'} /> Obra ativa</label>
-        </div>
-        <p class="sub" style="margin-top:20px">Nome das abas no arquivo (deixe vazio quando for igual ao padrão)</p>
-        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">${abas}</div>`,
-      acoes: [{ rotulo: 'Salvar obra', classe: 'primary', ao: async (m) => {
-        const v = (n) => m.querySelector(`[name=${n}]`).value.trim();
-        const corpo = {
-          codigo: o.codigo || v('codigo'), nome: v('nome'), empresa_spe: v('empresa_spe') || null,
-          cliente_investidor: v('cliente_investidor') || null, historico_aporte_investidor: v('historico_aporte_investidor') || null,
-          graph_item_id: v('graph_item_id') || null, arquivo_excel: v('arquivo_excel') || null,
-          ordem: Number(v('ordem') || 0), ativo: m.querySelector('[name=ativo]').checked,
-          abas: Object.fromEntries(fontesPadrao.map((f) => [f.codigo, v(`aba_${f.codigo}`)]).filter(([, aba]) => aba)),
-        };
-        await api('/api/obras', { metodo: 'POST', corpo });
-        toast('Obra salva', { texto: 'O seletor de obras será atualizado.' });
-        setTimeout(() => window.location.reload(), 700);
-      } }],
-    });
-  };
-  el.querySelector('#nova-obra').onclick = () => formulario();
-  el.querySelectorAll('[data-editar]').forEach((b) => (b.onclick = () => formulario(lista.find((o) => o.codigo === b.dataset.editar))));
-}
-
 async function historico(el) {
   const itens = await api('/obra/historico?limite=300');
   el.innerHTML = `<div class="sheet" style="max-height:70vh"><table><thead><tr><th class="first">Quando</th><th style="text-align:left">Usuário</th>
@@ -256,7 +201,6 @@ const SUB_ABAS = [
   { id: 'parametros', titulo: 'Viabilidade', tela: parametros },
   { id: 'usuarios', titulo: 'Usuários', tela: usuarios, permissao: 'gerir_usuarios' },
   { id: 'permissoes', titulo: 'Permissões', tela: permissoes, permissao: 'usuarios.gerenciar' },
-  { id: 'obras', titulo: 'Obras', tela: obras, permissao: 'obras.gerenciar' },
   { id: 'historico', titulo: 'Histórico', tela: historico },
 ];
 

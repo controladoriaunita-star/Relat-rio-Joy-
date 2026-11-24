@@ -3,7 +3,7 @@
 Ferramenta web de análise de custos e projeção de aportes das obras Joy+ (hoje Evans e Berrini).
 Substitui as abas **Resumo** e **Painel** da planilha de controle de cada obra, reproduzindo as
 fórmulas, e traz a aba **Projeção**, onde cada setor lança as suas projeções mensais.
-Um só app: as obras são módulos escolhidos no seletor do topo (ver seção 0).
+Um só app: a tela inicial mostra um card por obra e cada obra abre o mesmo relatório (ver seção 0).
 
 **Arquitetura:** front estático (`public/`) e API FastAPI (`api/index.py`) na **Vercel**;
 banco Postgres e login no **Supabase**; dados de origem lidos do SharePoint pelo **Microsoft Graph**.
@@ -18,9 +18,14 @@ banco Postgres e login no **Supabase**; dados de origem lidos do SharePoint pelo
   aporte usados pelas fórmulas, planilha de controle local e, só se diferirem do padrão, os nomes das abas.
 - **Dados por obra:** parâmetros (premissas e viabilidade), DePara, cargas, setores, linhas e projeções
   (coluna `obra`). A API de dados fica em `/api/obras/{obra}/...`; a URL do app é `#<obra>/<aba>`.
-- **Obra nova, sem código:** API's › Obras › Nova obra (permissão `obras.gerenciar`, papel admin).
-  Informe o código, o nome, a empresa SPE e o item id do arquivo `BD´s_JOY_<OBRA>` e depois use
-  "Atualizar do SharePoint". A obra nasce com os setores e linhas padrão.
+- **Tela inicial (`#inicio`):** um card por obra (aporte do mês, custo, saldo, consumo da viabilidade,
+  pendências e última atualização). Usuários de setor veem os cards sem os números do Resumo.
+- **Obra nova, sem código:** card "Nova obra" na tela inicial (permissão `obras.gerenciar`), em 3 passos:
+  1. dados principais (nome, código, arquivo escolhido da pasta `06 - API`, empresa SPE, investidor);
+  2. viabilidade por rubrica (digitada ou copiada de outra obra; o que faltar fica zero);
+  3. linhas de projeção (modelo padrão ou copiadas de outra obra, sem os valores).
+  Ao criar, o app já carrega as tabelas do SharePoint. "Configurar" no card altera os dados principais;
+  viabilidade e linhas seguem editáveis em API's › Viabilidade e Projeção › Setores e linhas.
 - **Atualização pelo SharePoint:** o app atualiza uma fonte por requisição (limite de 60 s da Vercel).
 
 ## 1. Deploy (Supabase + Vercel)

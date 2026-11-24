@@ -1,7 +1,8 @@
-// Inicialização: sessão, app shell, obra, navegação por abas e data-base.
-// URL: #<obra>/<aba> (ex.: #berrini/projecao); #<aba> usa a última obra escolhida.
+// Inicialização: sessão, app shell, tela inicial de obras, abas da obra e data-base.
+// URL: #inicio (cards das obras) ou #<obra>/<aba> (ex.: #berrini/projecao).
 import { api, definirObra, erroToast, esc, modal, toast } from './util.js';
 import * as sessao from './sessao.js';
+import * as inicio from './telas/inicio.js';
 import * as resumo from './telas/resumo.js';
 import * as aportes from './telas/aportes.js';
 import * as dashboards from './telas/dashboards.js';
@@ -20,16 +21,11 @@ const ABAS = [
 const raiz = document.getElementById('raiz');
 const hojeIso = () => new Date().toLocaleDateString('sv-SE');
 const estado = { usuario: null, dataBase: hojeIso(), abaAtual: null, obras: [], obra: null };
-const CHAVE_OBRA = 'aporte.obra';
-const lembrarObra = (codigo) => { try { localStorage.setItem(CHAVE_OBRA, codigo); } catch { /* sem storage */ } };
-const obraLembrada = () => { try { return localStorage.getItem(CHAVE_OBRA); } catch { return null; } };
 
-/** Lê #obra/aba da URL; aceita o formato antigo #aba. */
+/** Rota da URL: { obra, aba } dentro de uma obra; { obra: null } na tela inicial. */
 function lerRota() {
-  const partes = location.hash.slice(1).split('/').filter(Boolean);
-  const ehObra = (c) => estado.obras.some((o) => o.codigo === c);
-  const obra = ehObra(partes[0]) ? partes.shift() : null;
-  return { obra: obra || (ehObra(obraLembrada()) ? obraLembrada() : estado.obras[0]?.codigo), aba: partes[0] };
+  const [obra, aba] = location.hash.slice(1).split('/');
+  return estado.obras.some((o) => o.codigo === obra) ? { obra, aba } : { obra: null };
 }
 const rota = (aba, obra = estado.obra?.codigo) => `#${obra}/${aba}`;
 
@@ -103,11 +99,9 @@ function montarShell() {
   const u = estado.usuario;
   raiz.innerHTML = `
     <header class="app"><div class="in">
-      <img class="logo" src="/assets/logo-joy.png" alt="Joy+" />
-      ${estado.obras.length > 1 ? `<label class="seletor-obra" title="Obra"><span>Obra</span><select id="obra">
-        ${estado.obras.map((o) => `<option value="${esc(o.codigo)}">${esc(o.nome)}</option>`).join('')}</select></label>`
-        : `<span class="obra-unica">${esc(estado.obra?.nome || '')}</span>`}
-      <nav aria-label="Abas">${abasVisiveis().map((a) => `<a href="${rota(a.id)}" data-aba="${a.id}">${esc(a.titulo)}${emBreve(a) ? ' <span class="badge b-neutral em-breve">Em breve</span>' : ''}</a>`).join('')}</nav>
+      <a href="#inicio" class="marca" title="Obras"><img class="logo" src="/assets/logo-joy.png" alt="Joy+" /></a>
+      <div class="contexto" id="contexto"></div>
+      <nav aria-label="Abas" id="abas"></nav>
       <div class="direita">
         <label class="data-base" title="Data usada como 'hoje' nos cálculos (a planilha usa HOJE())">
           <span>Data-base</span><input type="date" id="data-base" value="${estado.dataBase}" />
@@ -138,53 +132,68 @@ function montarShell() {
     } }],
   }));
   document.getElementById('data-base').onchange = (e) => { estado.dataBase = e.target.value || hojeIso(); renderizar(); };
-  document.getElementById('obra')?.addEventListener('change', (e) => {
-    location.hash = rota(estado.abaAtual?.id || abasVisiveis()[0]?.id || 'resumo', e.target.value);
-  });
+}
+
+/** Topo: na tela inicial só "Obras"; dentro de uma obra, o caminho de volta, o nome e as abas. */
+function atualizarCabecalho(aba) {
+  const contexto = document.getElementById('contexto');
+  const abas = document.getElementById('abas');
+  if (!estado.obra) {
+    contexto.innerHTML = '<span class="contexto-titulo">Obras</span>';
+    abas.innerHTML = '';
+    document.title = 'Obras · Relatório de Aporte · Joy+';
+    return;
+  }
+  contexto.innerHTML = `<a href="#inicio" class="voltar" title="Voltar para as obras">‹ Obras</a>
+    <span class="contexto-obra">${esc(estado.obra.nome)}</span>`;
+  abas.innerHTML = abasVisiveis().map((a) => `<a href="${rota(a.id)}" data-aba="${a.id}" class="${a.id === aba.id ? 'on' : ''}">${esc(a.titulo)}${emBreve(a) ? ' <span class="badge b-neutral em-breve">Em breve</span>' : ''}</a>`).join('');
+  document.title = `${estado.obra.nome} · Relatório de Aporte · Joy+`;
 }
 
 async function renderizar() {
-  const abas = abasVisiveis();
-  const { obra: codigoObra, aba: idAba } = lerRota();
-  const aba = abas.find((a) => a.id === idAba) || abas[0];
   const conteudo = document.getElementById('conteudo');
-  if (!estado.obras.length) {
-    conteudo.innerHTML = `<div class="card empty"><h3>Nenhuma obra cadastrada</h3>
-      <p>Cadastre a primeira obra em API's › Obras.</p></div>`;
-    return;
-  }
-  if (!aba) {
-    conteudo.innerHTML = `<div class="card empty"><h3>Sem abas liberadas</h3>
-      <p>Seu perfil ainda não tem acesso a nenhuma aba. Fale com a Controladoria.</p></div>`;
-    return;
-  }
-  const trocouObra = estado.obra && estado.obra.codigo !== codigoObra;
-  if (estado.abaAtual?.tela.sair && (estado.abaAtual !== aba || trocouObra) && !estado.abaAtual.tela.sair()) {
-    location.hash = rota(estado.abaAtual.id);   // alterações não salvas: fica onde estava
+  const { obra: codigoObra, aba: idAba } = lerRota();
+  const abas = abasVisiveis();
+  const aba = codigoObra ? abas.find((a) => a.id === idAba) || abas[0] : null;
+  const saindo = estado.abaAtual && (estado.abaAtual !== aba || estado.obra?.codigo !== codigoObra);
+  if (saindo && estado.abaAtual.tela.sair && !estado.abaAtual.tela.sair()) {
+    history.replaceState(null, '', rota(estado.abaAtual.id));   // alterações não salvas: fica onde estava
     return;
   }
   estado.abaAtual = aba;
-  estado.obra = estado.obras.find((o) => o.codigo === codigoObra);
-  definirObra(estado.obra.codigo);
-  lembrarObra(estado.obra.codigo);
-  const seletor = document.getElementById('obra');
-  if (seletor) seletor.value = estado.obra.codigo;
-  if (location.hash !== rota(aba.id)) history.replaceState(null, '', rota(aba.id));
-  document.querySelectorAll('header.app nav a').forEach((a) => { a.href = rota(a.dataset.aba); });
-  document.title = `${estado.obra.nome} · Relatório de Aporte · Joy+`;
-  document.querySelectorAll('header.app nav a').forEach((a) => a.classList.toggle('on', a.dataset.aba === aba.id));
-  if (emBreve(aba)) {
-    conteudo.innerHTML = `<div class="card empty fade"><span class="badge b-primary">Em breve</span>
-      <h3>${esc(aba.titulo)} em construção</h3><p>Esta aba está sendo preparada e logo estará disponível.</p></div>`;
-    return;
-  }
+  estado.obra = codigoObra ? estado.obras.find((o) => o.codigo === codigoObra) : null;
+  definirObra(estado.obra?.codigo || null);
+  const destino = estado.obra ? rota(aba?.id || 'resumo') : '#inicio';
+  if (location.hash !== destino) history.replaceState(null, '', destino);
+  atualizarCabecalho(aba || {});
+  const contexto = { usuario: estado.usuario, dataBase: estado.dataBase, recarregar: renderizar, obra: estado.obra };
   try {
-    await aba.tela.render(conteudo, { usuario: estado.usuario, dataBase: estado.dataBase, recarregar: renderizar,
-                                      obra: estado.obra });
+    if (!estado.obra) {
+      await inicio.render(conteudo, { ...contexto, aoMudarObras: recarregarObras });
+      return;
+    }
+    if (!aba) {
+      conteudo.innerHTML = `<div class="card empty"><h3>Sem abas liberadas</h3>
+        <p>Seu perfil ainda não tem acesso a nenhuma aba. Fale com a Controladoria.</p></div>`;
+      return;
+    }
+    if (emBreve(aba)) {
+      conteudo.innerHTML = `<div class="card empty fade"><span class="badge b-primary">Em breve</span>
+        <h3>${esc(aba.titulo)} em construção</h3><p>Esta aba está sendo preparada e logo estará disponível.</p></div>`;
+      return;
+    }
+    await aba.tela.render(conteudo, contexto);
   } catch (erro) {
     if (erro.status === 401) return;
-    conteudo.innerHTML = `<div class="alert a-error"><b>Erro ao carregar a aba</b><div>${esc(erro.message)}</div></div>`;
+    conteudo.innerHTML = `<div class="alert a-error"><b>Erro ao carregar a tela</b><div>${esc(erro.message)}</div></div>`;
   }
+}
+
+/** Depois de cadastrar ou alterar uma obra: atualiza a lista e, se pedido, abre a obra. */
+async function recarregarObras(abrir) {
+  estado.obras = (await api('/api/obras')).filter((o) => o.ativo !== false);
+  if (abrir) location.hash = rota('apis', abrir);
+  else renderizar();
 }
 
 async function iniciar() {

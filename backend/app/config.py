@@ -44,4 +44,6 @@ GRAPH_TENANT_ID = os.environ.get("GRAPH_TENANT_ID", "")
 GRAPH_CLIENT_ID = os.environ.get("GRAPH_CLIENT_ID", "")
 GRAPH_CLIENT_SECRET = os.environ.get("GRAPH_CLIENT_SECRET", "")
 GRAPH_DRIVE_ID = os.environ.get("GRAPH_DRIVE_ID", "")   # biblioteca da pasta 06 - API
+# Pasta com os arquivos de dados das obras ("BD´s_JOY_<OBRA>"); o cadastro de obra lista o que há nela.
+GRAPH_PASTA_OBRAS = os.environ.get("GRAPH_PASTA_OBRAS", "/02 - Colaboração/05 - Planejamento e Controle/06 - API")
 # O arquivo de cada obra (item id) fica no cadastro da obra (backend/app/obras.py).

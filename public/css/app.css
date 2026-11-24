@@ -37,14 +37,14 @@ header.app .data-base input {
   height: 32px; border-radius: var(--r-control); border: 1px solid var(--border);
   background: #fff; color: var(--text); padding: 0 8px;
 }
-/* Obra ativa: contexto de todas as abas */
-header.app .seletor-obra { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
-header.app .seletor-obra select {
-  height: 34px; border-radius: var(--r-control); border: 1px solid var(--color-primary);
-  background: var(--color-primary-soft); color: var(--color-primary); font-weight: 700;
-  padding: 0 10px; max-width: 220px; cursor: pointer;
-}
-header.app .obra-unica { font-weight: 700; color: var(--color-primary); white-space: nowrap; }
+/* Contexto no topo: "Obras" na tela inicial; "‹ Obras" + nome dentro de uma obra */
+header.app .marca { display: flex; }
+header.app .contexto { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+header.app .contexto-titulo { font-family: var(--display); font-weight: 600; font-size: 16px; color: var(--text); }
+header.app .voltar { color: var(--muted); text-decoration: none; font-weight: 600; font-size: 13px; padding: 4px 8px;
+  border-radius: var(--r-control); transition: background .15s, color .15s; }
+header.app .voltar:hover { color: var(--color-primary); background: var(--color-primary-soft); }
+header.app .contexto-obra { font-family: var(--display); font-weight: 600; font-size: 16px; color: var(--color-primary); }
 header.app .troca-perfil { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
 header.app .troca-perfil select {
   height: 32px; border-radius: var(--r-control); border: 1px solid var(--color-primary);
@@ -423,7 +423,7 @@ main { padding: 24px var(--gutter) 96px; }
   header.app .direita { gap: 8px; }
 }
 @media (max-width: 640px) {
-  header.app .u, header.app .data-base span, header.app .troca-perfil span, header.app .seletor-obra span { display: none; }
+  header.app .u, header.app .data-base span, header.app .troca-perfil span { display: none; }
 }
 @media (max-width: 760px) {
   main { padding: 20px 16px 80px; }
@@ -489,4 +489,63 @@ main { padding: 24px var(--gutter) 96px; }
   .parcela-valor b { font-size: 10px; }
   .parcela-valor span, .parcela .par.sub-par { font-size: 7.2px; }
   .badge { font-size: 7px; padding: 1px 5px; }
+}
+
+/* ---------------------------------------------------------------- Tela inicial: obras */
+.grade-obras { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.cartao-obra { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; color: inherit; text-decoration: none;
+  transition: border-color .15s, box-shadow .15s, transform .15s; text-align: left; font: inherit; cursor: pointer; }
+.cartao-obra:hover { border-color: var(--color-primary); box-shadow: var(--shadow-overlay); transform: translateY(-2px); }
+.cartao-obra:focus-visible { outline: 3px solid var(--color-primary-ring); outline-offset: 2px; }
+.cartao-obra-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.cartao-obra h3 { font-family: var(--display); font-size: 20px; margin: 0; }
+.cartao-obra-topo .muted { font-size: 12px; }
+.cartao-obra-aporte { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: var(--r-control);
+  background: var(--color-primary-soft); }
+.cartao-obra-aporte .l { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.cartao-obra-aporte .v { font-family: var(--display); font-size: 26px; font-weight: 600; color: var(--color-primary);
+  font-variant-numeric: tabular-nums; }
+.cartao-obra-aporte .h { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cartao-obra-numeros { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.cartao-obra-numeros dt { font-size: 11px; color: var(--muted); }
+.cartao-obra-numeros dd { margin: 2px 0 0; font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; }
+.cartao-obra-rodape { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: auto; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; }
+.erro-cartao { margin: 0; color: var(--error); font-size: 13px; }
+.cartao-nova { align-items: center; justify-content: center; text-align: center; border-style: dashed; background: transparent;
+  min-height: 260px; color: var(--muted); }
+.cartao-nova .mais { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; font-size: 28px;
+  color: var(--color-primary); background: var(--color-primary-soft); }
+.cartao-nova h3 { color: var(--text); }
+
+/* ---------------------------------------------------------------- Cadastro de obra */
+.modal-largo { max-width: 880px; }
+.passos { display: flex; gap: 6px; list-style: none; padding: 0; margin: 12px 0 18px; flex-wrap: wrap; }
+.passos li { padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--muted);
+  background: var(--ink-50); border: 1px solid var(--border); }
+.passos li.on { color: var(--color-primary); background: var(--color-primary-soft); border-color: var(--color-primary); }
+.passos li.feito { color: var(--success); }
+.form-obra { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.form-obra .campo-largo { grid-column: 1 / -1; }
+.form-obra select, .form-obra input { width: 100%; }
+.avancado { margin-top: 18px; }
+.avancado summary { cursor: pointer; font-weight: 600; color: var(--color-primary); }
+.form-viab { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px 14px; max-height: 46vh; overflow: auto; padding-right: 4px; }
+.form-viab label { font-size: 12px; }
+.total-viab { margin-left: auto; color: var(--muted); }
+.total-viab b { color: var(--text); font-variant-numeric: tabular-nums; }
+.opcoes-linhas { display: grid; gap: 10px; margin: 14px 0; }
+.opcao { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border);
+  border-radius: var(--r-control); cursor: pointer; }
+.opcao:has(input:checked) { border-color: var(--color-primary); background: var(--color-primary-soft); }
+.opcao span { display: flex; flex-direction: column; gap: 2px; }
+.opcao small { color: var(--muted); }
+.previa-linhas { display: grid; gap: 4px; font-size: 13px; }
+.progresso-carga { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 8px; }
+.progresso-carga li { display: flex; align-items: center; gap: 8px; }
+
+@media (max-width: 640px) {
+  .grade-obras { grid-template-columns: 1fr; }
+  .cartao-obra-numeros { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  header.app .contexto-titulo, header.app .contexto-obra { font-size: 14px; }
 }

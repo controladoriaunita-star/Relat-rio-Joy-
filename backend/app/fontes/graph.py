@@ -53,9 +53,21 @@ class ClienteGraph:
         carga += "=" * (-len(carga) % 4)
         return json.loads(base64.urlsafe_b64decode(carga)).get("roles") or []
 
+    def listar_pasta(self, pasta: str) -> list[dict]:
+        """Planilhas da pasta (nome, item id, data de alteração), para escolher o arquivo de uma obra."""
+        url = (f"https://graph.microsoft.com/v1.0/drives/{config.GRAPH_DRIVE_ID}/root:{quote(pasta)}:/children"
+               "?$select=name,id,lastModifiedDateTime,file&$top=200")
+        resposta = self._sessao.get(url, headers={"Authorization": f"Bearer {self._obter_token()}"}, timeout=30)
+        if resposta.status_code != 200:
+            raise ErroGraph(f"Não foi possível listar a pasta {pasta} no SharePoint ({resposta.status_code}).")
+        return sorted(({"id": i["id"], "nome": i["name"], "alterado_em": i["lastModifiedDateTime"]}
+                       for i in resposta.json().get("value", [])
+                       if "file" in i and i["name"].lower().endswith((".xlsx", ".xlsm"))),
+                      key=lambda a: a["nome"])
+
     def _get(self, item: str, caminho: str, timeout: int = 120) -> requests.Response:
         if not item:
-            raise ErroGraph("A obra não tem arquivo do SharePoint configurado (API's › Obras).")
+            raise ErroGraph("A obra não tem arquivo do SharePoint configurado (cadastro da obra).")
         url = URL_ITEM.format(drive=config.GRAPH_DRIVE_ID, item=item) + caminho
         return self._sessao.get(url, headers={"Authorization": f"Bearer {self._obter_token()}"}, timeout=timeout)
 
@@ -63,12 +75,12 @@ class ClienteGraph:
         """Diz se o problema é o arquivo (GRAPH_ITEM_ID) ou a aba, para o erro não ficar genérico."""
         arquivo = self._get(item, "?$select=name", timeout=30)
         if arquivo.status_code != 200:
-            return "Arquivo não encontrado no SharePoint: confira o arquivo da obra (API's › Obras)."
+            return "Arquivo não encontrado no SharePoint: confira o arquivo no cadastro da obra."
         abas = self._get(item, "/workbook/worksheets?$select=name", timeout=60)
         nomes = [w["name"] for w in abas.json().get("value", [])] if abas.status_code == 200 else []
         return (f"A aba '{aba}' não existe no arquivo configurado ({arquivo.json().get('name')}). "
                 + (f"Abas do arquivo: {', '.join(nomes)}. " if nomes else "")
-                + "Confira o arquivo da obra (API's › Obras).")
+                + "Confira o arquivo no cadastro da obra.")
 
     def ler_aba(self, item: str, aba: str) -> list[list]:
         """Valores do usedRange da aba do arquivo `item` (primeira linha = cabeçalho)."""

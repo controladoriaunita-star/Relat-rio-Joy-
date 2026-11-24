@@ -15,7 +15,7 @@ from datetime import date
 
 import requests
 
-from . import auth
+from . import auth, config
 from .catalogo import (INICIO_LINHA_DO_TEMPO, MESES_LINHA_DO_TEMPO, PAPEIS_GERAIS, PAPEL_ADMIN, PERMISSOES,
                        PERMISSOES_PADRAO, PERMISSOES_SETOR, RUBRICAS, SETORES_PADRAO, VIABILIDADE_PADRAO,
                        Premissas)
@@ -131,15 +131,64 @@ class Servico:
                         ordem=int(dados.get("ordem") or 0), ativo=bool(dados.get("ativo", True)))
         except (TypeError, ValueError) as erro:
             raise ErroNegocio("Empresa, cliente e ordem precisam ser números inteiros.") from erro
+        nova = not self.banco.um("SELECT 1 FROM obras WHERE codigo = ?", codigo)
+        viabilidade = dados.get("viabilidade") or {}
+        if set(viabilidade) - set(RUBRICAS):
+            raise ErroNegocio("Viabilidade com rubrica desconhecida.")
+        linhas_de = dados.get("linhas_de") or "padrao"
+        if nova and linhas_de != "padrao" and not self.banco.um("SELECT 1 FROM obras WHERE codigo = ?", linhas_de):
+            raise ErroNegocio("Obra de origem das linhas de projeção não encontrada.")
         with self.banco.transacao() as con:
             con.execute("INSERT INTO obras (codigo, nome, ordem, ativo, config) VALUES (?, ?, ?, ?, ?) "
                         "ON CONFLICT (codigo) DO UPDATE SET nome = excluded.nome, ordem = excluded.ordem, "
                         "ativo = excluded.ativo, config = excluded.config",
                         (codigo, nome, obra.ordem, int(obra.ativo), para_json(self._config_da_obra(obra))))
             self.banco.registrar(con, autor["login"], "obra.salvar", obra.como_dict())
-        self.obra(codigo).inicializar()
+        servico_obra = self.obra(codigo)
+        if nova:
+            # A obra nova nasce com a viabilidade informada (zero no que faltar), não com a da Evans,
+            # e com as linhas de projeção do modelo padrão ou copiadas de outra obra.
+            servico_obra.salvar_viabilidade({r: float(viabilidade.get(r) or 0) for r in RUBRICAS}, autor)
+            if linhas_de != "padrao":
+                servico_obra.copiar_linhas_de(self.obra(linhas_de))
+        servico_obra.inicializar()
         self._semear_permissoes()
         return obra
+
+    def arquivos_sharepoint(self) -> list[dict]:
+        """Planilhas da pasta de dados das obras, marcando as que já são de alguma obra."""
+        usados = {o.graph_item_id: o.nome for o in self.obras(incluir_inativas=True) if o.graph_item_id}
+        try:
+            arquivos = self.graph.listar_pasta(config.GRAPH_PASTA_OBRAS)
+        except (ErroGraph, requests.RequestException) as erro:
+            raise ErroNegocio(str(erro)) from erro
+        return [{**a, "obra": usados.get(a["id"])} for a in arquivos]
+
+    def painel_inicio(self, hoje: date) -> list[dict]:
+        """Um card por obra ativa: aporte do mês, custo do mês, saldo, pendências e atualização.
+        Uma obra com problema não impede as demais de aparecer."""
+        cards = []
+        for obra in self.obras():
+            card = {"codigo": obra.codigo, "nome": obra.nome, "empresa_spe": obra.empresa_spe,
+                    "arquivo": bool(obra.graph_item_id)}
+            try:
+                servico_obra = self.obra(obra.codigo)
+                resumo = servico_obra.calcular("resumo", hoje)
+                _, resultados = servico_obra.base()
+                aporte = resumo["aporte_mes"]
+                card.update({
+                    "mes": resumo["datas"]["mes_atual"], "aporte_total": aporte.get("aporte_total"),
+                    "investidor": aporte.get("investidor"), "joy": aporte.get("joy"),
+                    "custo_mes": aporte.get("custo_mes"), "saldo_anterior": aporte.get("saldo_anterior"),
+                    "viabilidade": resumo["total"]["viabilidade"],
+                    "pago_total": (resumo["total"].get("pago_ate") or 0) + (resumo["total"].get("pago_mes") or 0),
+                    "pendentes": sum(len(r.pendentes) for r in resultados.values()),
+                    "com_dados": any(r.linhas_lidas for r in resultados.values()),
+                    "ultima_atualizacao": resumo["ultima_atualizacao"]})
+            except Exception as erro:          # noqa: BLE001 — o card mostra o erro, a tela segue
+                card["erro"] = str(erro)[:200]
+            cards.append(card)
+        return cards
 
     # ---------------------------------------------------------------- papéis (comuns às obras)
     def perfis(self) -> dict[str, str]:
@@ -277,6 +326,19 @@ class ServicoObra:
             self.banco.salvar_parametro(self.codigo, "premissas", Premissas().como_dict())
         if self.banco.parametro(self.codigo, "viabilidade") is None:
             self.banco.salvar_parametro(self.codigo, "viabilidade", VIABILIDADE_PADRAO)
+
+    def copiar_linhas_de(self, origem: "ServicoObra") -> None:
+        """Setores e linhas de projeção (sem valores) iguais aos de outra obra; só se esta ainda não tem setores."""
+        with self.banco.transacao() as con:
+            if con.execute("SELECT 1 FROM setores WHERE obra = ? LIMIT 1", (self.codigo,)).fetchone():
+                return
+            for setor in origem.setores():
+                sid = con.execute("INSERT INTO setores (obra, codigo, nome, ordem) VALUES (?, ?, ?, ?) RETURNING id",
+                                  (self.codigo, setor["codigo"], setor["nome"], setor["ordem"])).fetchone()["id"]
+                for linha in setor["linhas"]:
+                    con.execute("INSERT INTO linhas_projecao (setor_id, nome, rubrica, ordem) VALUES (?, ?, ?, ?)",
+                                (sid, linha["nome"], linha["rubrica"], linha["ordem"]))
+            self._registrar(con, None, "setores.copiar", {"de": origem.codigo})
 
     def _registrar(self, con, usuario: dict | None, acao: str, detalhe=None) -> None:
         self.banco.registrar(con, usuario and usuario["login"], acao, detalhe, obra=self.codigo)
