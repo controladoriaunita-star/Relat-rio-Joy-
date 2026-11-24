@@ -608,3 +608,20 @@ def test_linhas_de_outra_empresa_sao_descartadas():
     cab_nn = ["Empresa", "Obra", "NProcesso", "DocFiscal", "DataPagamento", "TotalLiquido", "Status", "Classificação"]
     nn = [dict(zip(cab_nn, [10, "X", 1, "NF1", "2026-11-10", 50.0, "Pago", "Projetos"]))]
     assert len(normalizar("custos_nn", nn, {}, empresa=67).registros) == 1
+
+
+def test_lancamentos_da_rubrica_somam_a_linha_do_resumo(ambiente):
+    """Os lançamentos abertos sob cada rubrica de custo somam as colunas pagas e a pagar da linha."""
+    adm = cliente(ambiente, "edu.adm")
+    resumo = adm.get(f"/api/obras/evans/resumo?data={HOJE}").json()
+    com_valor = 0
+    for linha in resumo["linhas"]:
+        if linha["grupo"] not in ("custo", "despesa"):
+            continue
+        itens = adm.get("/api/obras/evans/resumo/lancamentos", params={"rubrica": linha["rubrica"], "data": HOJE}).json()
+        for coluna in ("pago_ate", "pago_mes", "a_pagar"):
+            soma = sum(i["valor"] for i in itens if i["coluna"] == coluna)
+            assert math.isclose(soma, linha[coluna], abs_tol=0.01), (linha["rubrica"], coluna, soma, linha[coluna])
+        com_valor += bool(itens)
+    assert com_valor > 0
+    assert adm.get("/api/obras/evans/resumo/lancamentos", params={"rubrica": "Não existe"}).status_code == 422

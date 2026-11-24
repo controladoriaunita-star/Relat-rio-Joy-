@@ -30,7 +30,7 @@ from .motor import dashboards as painel_dashboards
 from .motor.aportes import aportes_ate
 from .motor.base import Base, LinhaProjecao
 from .motor.painel import calcular_painel
-from .motor.resumo import calcular_resumo, saldo_fim_de_mes
+from .motor.resumo import calcular_resumo, lancamentos_da_rubrica, saldo_fim_de_mes
 from .obras import CODIGO_VALIDO, OBRA_PADRAO, OBRAS_PADRAO, Obra
 
 TIPO_PROJETADO = "Projetado"
@@ -844,6 +844,13 @@ class ServicoObra:
                 "custos": painel_dashboards.custos_por_rubrica(resumo),
                 "participacao": resumo["participacao"],
                 "ultima_atualizacao": resumo["ultima_atualizacao"]}
+
+    def lancamentos_da_rubrica(self, rubrica: str, hoje: date) -> list[dict]:
+        """Lançamentos classificados na rubrica que compõem as colunas pagas e a pagar do Resumo."""
+        if rubrica not in self.nomes_rubricas():
+            raise ErroNegocio("Rubrica desconhecida nesta obra.")
+        base, _ = self.base()
+        return lancamentos_da_rubrica(base, rubrica, hoje)
 
     def aportes(self, hoje: date) -> dict:
         """Aportes feitos até a data-base (ver motor/aportes.py)."""

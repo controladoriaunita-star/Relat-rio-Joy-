@@ -91,7 +91,7 @@ export const erroToast = (erro) => toast('Não foi possível concluir', { tipo: 
  * Abre um modal; `acoes` = [{rotulo, classe, ao}] — `ao` pode devolver false para manter aberto.
  * `fecharFora`: clicar no fundo escuro fecha (desligue em formulários longos, para não perder o digitado).
  */
-export function modal({ titulo, conteudo = '', acoes = [], fecharFora = true }) {
+export function modal({ titulo, conteudo = '', acoes = [], fecharFora = true, rotuloFechar = 'Cancelar' }) {
   const overlay = document.createElement('div');
   overlay.className = 'overlay';
   overlay.innerHTML = `<div class="card modal" role="dialog" aria-modal="true" aria-label="${esc(titulo)}">
@@ -99,7 +99,7 @@ export function modal({ titulo, conteudo = '', acoes = [], fecharFora = true }) 
     <div class="foot"></div></div>`;
   const fechar = () => overlay.remove();
   const rodape = overlay.querySelector('.foot');
-  for (const acao of [{ rotulo: 'Cancelar', classe: 'ghost' }, ...acoes]) {
+  for (const acao of [{ rotulo: rotuloFechar, classe: 'ghost' }, ...acoes]) {
     const botao = document.createElement('button');
     botao.className = `btn ${acao.classe || 'secondary'}`;
     botao.textContent = acao.rotulo;

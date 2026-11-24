@@ -212,6 +212,11 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
                _: dict = Depends(exigir("resumo.ver"))):
         return so.calcular("resumo", hoje)
 
+    @obra.get("/resumo/lancamentos")
+    def lancamentos_resumo(rubrica: str, hoje: date = Depends(data_base), so: ServicoObra = Depends(servico_obra),
+                           _: dict = Depends(exigir("resumo.ver"))):
+        return so.lancamentos_da_rubrica(rubrica, hoje)
+
     @obra.get("/dashboards")
     def dashboards(hoje: date = Depends(data_base), so: ServicoObra = Depends(servico_obra),
                    _: dict = Depends(exigir("dashboards.ver"))):

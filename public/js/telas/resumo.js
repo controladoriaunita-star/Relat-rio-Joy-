@@ -1,6 +1,7 @@
 // Aba Resumo: reproduz a aba Resumo da planilha — tabela de custos e despesas por rubrica
 // (à esquerda) e o Relatório de Aporte (à direita). Tudo segue o mês da data-base.
 // Os gráficos ficam na aba Dashboards.
+import { abrirRubrica } from './rubrica_card.js';
 import { editarViabilidade } from './viabilidade.js';
 import { api, carregando, ehNumero, esc, fmt, lerNumero, modal, toast } from '../util.js';
 
@@ -20,7 +21,11 @@ const celula = (l, campo) => (campo in l ? numero(l[campo]) : '');
 function linhaTabela(l, classe = '') {
   const pct = !ehNumero(l.pct_consumido) ? '' : Math.abs(l.pct_consumido) < 0.0005 ? '-' : fmt.pct(l.pct_consumido);
   const acima = ehNumero(l.pct_consumido) && l.pct_consumido > 1;
-  return `<tr class="${classe}"><td class="first">${esc(l.rubrica)}</td>
+  // Rubricas de custo e despesa abrem o card com os lançamentos classificados nelas.
+  const abre = (l.grupo === 'custo' || l.grupo === 'despesa') && classe === '';
+  const nome = abre ? `<button class="segmentador" data-rubrica="${esc(l.rubrica)}" aria-haspopup="dialog"
+      title="Analisar os lançamentos desta rubrica"><span class="seta">▸</span>${esc(l.rubrica)}</button>` : esc(l.rubrica);
+  return `<tr class="${classe}${abre ? ' linha-segmentador' : ''}"><td class="first">${nome}</td>
     <td>${'viabilidade' in l ? numero(l.viabilidade) : ''}</td>
     <td class="${acima ? 'alerta' : ''}">${pct}</td>
     ${CAMPOS.map((c) => `<td class="${c.startsWith('projetado') ? 'proj' : ''}">${celula(l, c)}</td>`).join('')}</tr>`;
@@ -322,6 +327,12 @@ export async function render(el, ctx) {
     </div>
   </div>`;
   el.querySelector('#premissas')?.addEventListener('click', () => editarPremissas(recarregar));
+  el.querySelector('.tabela-resumo').addEventListener('click', (e) => {
+    const botao = e.target.closest('.segmentador');
+    if (!botao) return;
+    const linha = d.linhas.find((l) => l.rubrica === botao.dataset.rubrica);
+    if (linha) abrirRubrica({ linha, dataBase, mesAtual: d.datas.mes_atual });
+  });
   el.querySelector('#viabilidade')?.addEventListener('click', () => editarViabilidade(ctx));
   el.querySelector('#cronograma')?.addEventListener('click', () => editarCronograma(d, recarregar));
 }

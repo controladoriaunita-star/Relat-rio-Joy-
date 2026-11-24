@@ -85,6 +85,34 @@ def _projetado_proximo(base: Base, rotulo: str, mes: date, ate: date) -> float: 
                     lambda d: texto_igual(d.status, "A pagar") and d.fim_mes == eomonth(ate, 1)))
 
 
+def lancamentos_da_rubrica(base: Base, rubrica: str, hoje: date) -> list[dict]:
+    """Lançamentos que compõem as colunas Pago até (H), Pago no mês (J) e Contas a pagar (L) da
+    rubrica, com as mesmas regras de _pago_ate, _pago_no_mes e _a_pagar (a soma bate com a linha)."""
+    mes = eomonth(hoje, 0)
+    saida = []
+
+    def incluir(fonte: str, registro, coluna: str, data, descricao, status=None):
+        saida.append({"fonte": fonte, "coluna": coluna, "data": data, "descricao": descricao,
+                      "fornecedor": getattr(registro, "fornecedor", None), "status": status,
+                      "valor": registro.valor})
+
+    for fonte, titulo in (("custos_spe", "Custos SPE"), ("custos_nn", "Custos NN's")):
+        for d in base.filtrar(fonte, "classificacao", rubrica):
+            if texto_igual(d.status, "Pago") and d.fim_mes < mes:
+                incluir(titulo, d, "pago_ate", d.data_pagamento, d.insumo, d.status)
+            elif texto_igual(d.status, "Pago") and d.fim_mes == mes:
+                incluir(titulo, d, "pago_mes", d.data_pagamento, d.insumo, d.status)
+            elif (fonte == "custos_spe" and texto_igual(d.status, "A Pagar")
+                  and _ou_zero(d.data_pagamento) <= mes):
+                incluir(titulo, d, "a_pagar", d.data_pagamento, d.insumo, d.status)
+    for m in base.filtrar("saidas", "classificacao", rubrica):
+        if m.fim_mes < mes:
+            incluir("Controle Saídas", m, "pago_ate", m.data, m.historico)
+        elif m.fim_mes == mes:
+            incluir("Controle Saídas", m, "pago_mes", m.data, m.historico)
+    return sorted(saida, key=lambda x: (x["data"] or DATA_ZERO), reverse=True)
+
+
 def _dividir(a: float, b) -> float | None:
     return a / b if b else None
 
