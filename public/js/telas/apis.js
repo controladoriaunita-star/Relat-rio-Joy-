@@ -1,6 +1,7 @@
 // Aba API's: validador de atualização das fontes, pendências de classificação,
 // saldos bancários (lançamento manual), parâmetros, usuários e histórico.
-import { api, carregando, erroToast, esc, fmt, lerNumero, modal, toast } from '../util.js';
+import { montarViabilidade } from './viabilidade.js';
+import { api, carregando, erroToast, esc, fmt, modal, toast } from '../util.js';
 
 let subAba = 'fontes';
 
@@ -118,20 +119,13 @@ async function saldos(el) {
 }
 
 async function parametros(el, ctx) {
-  const { viabilidade } = await api('/obra/parametros');
-  const pode = ctx.usuario.permissoes['premissas.editar'];
-  el.innerHTML = `<div class="alert a-info" style="margin-bottom:16px"><b>Valor de viabilidade (EVE) por rubrica</b>
-      <div>Coluna D do Resumo e X do Painel. As premissas do aporte ficam no botão "Premissas" da aba Resumo.</div></div>
-    <div class="card pad"><form id="form-viab"><div class="formulario">
-      ${Object.entries(viabilidade).map(([r, v]) => `<div class="field"><label>${esc(r)}</label>
-        <input name="${esc(r)}" value="${fmt.numero(v)}" inputmode="decimal" ${pode ? '' : 'disabled'} /></div>`).join('')}
-    </div>${pode ? '<div class="row-flex" style="margin-top:16px"><button class="btn primary" type="submit">Salvar viabilidade</button></div>' : ''}</form></div>`;
+  const pode = Boolean(ctx.usuario.permissoes['premissas.editar']);
+  el.innerHTML = `<div class="card pad"><form id="form-viab"><div data-viab></div>
+    ${pode ? '<div class="row-flex" style="margin-top:16px"><button class="btn primary" type="submit">Salvar viabilidade</button></div>' : ''}</form></div>`;
+  const salvar = await montarViabilidade(el.querySelector('[data-viab]'), { obra: ctx.obra, obras: ctx.obras, pode });
   el.querySelector('#form-viab').onsubmit = async (e) => {
     e.preventDefault();
-    const corpo = Object.fromEntries([...e.currentTarget.querySelectorAll('input')].map((i) => [i.name, lerNumero(i.value)]));
-    if (Object.values(corpo).some(Number.isNaN)) return toast('Há valores inválidos', { tipo: 'error' });
-    try { await api('/obra/parametros/viabilidade', { metodo: 'PUT', corpo }); toast('Viabilidade salva'); ctx.recarregar(); }
-    catch (erro) { erroToast(erro); }
+    try { await salvar(); ctx.recarregar(); } catch (erro) { erroToast(erro); }
   };
 }
 

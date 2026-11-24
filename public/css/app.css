@@ -558,3 +558,14 @@ main { padding: 24px var(--gutter) 96px; }
 .grade-projecao tr:hover .editar-linha, .grade-projecao .editar-linha:focus-visible { opacity: 1; }
 @media (hover: none) { .grade-projecao .editar-linha { opacity: 1; } }
 @media print { .grade-projecao .acoes-linha, .grade-projecao .editar-linha { display: none; } }
+
+/* Viabilidade por obra */
+.grupo-viab { border: 1px solid var(--line, #e5e7eb); border-radius: 10px; padding: 10px 14px 14px; margin: 0 0 12px; }
+.grupo-viab legend { padding: 0 6px; font-weight: 600; font-size: 13px; }
+.grupo-viab legend b { font-weight: 500; color: var(--muted); margin-left: 6px; }
+.grupo-viab .form-viab { max-height: none; overflow: visible; }
+.modal-largo .conteudo:has([data-viab]) { max-height: 64vh; overflow: auto; padding-right: 4px; }
+.campo-rubrica .nome-rubrica { display: flex; gap: 4px; align-items: center; margin-bottom: 4px; }
+.campo-rubrica .nome-rubrica input { font-size: 12px; font-weight: 600; height: 28px; }
+.nota-rubrica { font-size: 11px; color: var(--muted); }
+.campos-investidor[hidden], .divisao-campos[hidden] { display: none; }

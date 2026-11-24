@@ -18,6 +18,16 @@ let visao = 'consolidado';
 let anoSelecionado = null;
 let ocultarZeradas = false;     // esconde rubricas sem nenhum valor (realizado, projetado e EVE)
 
+/** Seções com as rubricas da obra (a lista muda de obra para obra; as novas têm linha fracionária). */
+function secoesDe(dados) {
+  const doGrupo = (g) => dados.linhas.filter((l) => l.grupo === g).map((l) => l.linha_excel).sort((a, b) => a - b);
+  const linha105 = dados.linhas.find((l) => l.linha_excel === 105);
+  const semInvestidor = dados.participacao?.com_investidor === false && !(linha105 && (linha105.H || linha105.P));
+  return SECOES.filter((s) => !(semInvestidor && s.titulo === 'Investidor'))
+    .map((s) => (s.titulo === 'Custos' ? { ...s, linhas: [...doGrupo('custo'), [59, 'total']] }
+      : s.titulo === 'Despesas' ? { ...s, linhas: [...doGrupo('despesa'), [79, 'total']] } : s));
+}
+
 function range(a, b) { return Array.from({ length: b - a + 1 }, (_, i) => a + i); }
 
 function valor(v, pct = false) {
@@ -34,7 +44,7 @@ function tabelaConsolidado(dados) {
   const linhas = Object.fromEntries(dados.linhas.map((l) => [l.linha_excel, l]));
   const t = dados.titulos;
   let corpo = '';
-  for (const secao of SECOES) {
+  for (const secao of secoesDe(dados)) {
     corpo += `<tr class="secao"><td class="first" colspan="9">${secao.titulo}</td></tr>`;
     for (const item of secao.linhas) {
       const [r, estilo] = Array.isArray(item) ? item : [item, ''];
@@ -69,7 +79,7 @@ function tabelaLinhaDoTempo(dados) {
   const corte = dados.datas.corte;
   const cab = indices.map(([m], j) => `<th class="${m === corte ? 'cur' : ''} ${m.endsWith('-01-31') && j ? 'ano-inicio' : ''}">${fmt.mes(m)}</th>`).join('');
   let corpo = '';
-  for (const secao of [...SECOES, { titulo: 'Acumulados', linhas: [[122, 'total']] }]) {
+  for (const secao of [...secoesDe(dados), { titulo: 'Acumulados', linhas: [[122, 'total']] }]) {
     corpo += `<tr class="secao"><td class="first">${secao.titulo}</td><td colspan="${indices.length + 2}"></td></tr>`;
     for (const item of secao.linhas) {
       const [r, estilo] = Array.isArray(item) ? item : [item, ''];

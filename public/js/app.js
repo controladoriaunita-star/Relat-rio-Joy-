@@ -166,7 +166,8 @@ async function renderizar() {
   const destino = estado.obra ? rota(aba?.id || 'resumo') : '#inicio';
   if (location.hash !== destino) history.replaceState(null, '', destino);
   atualizarCabecalho(aba || {});
-  const contexto = { usuario: estado.usuario, dataBase: estado.dataBase, recarregar: renderizar, obra: estado.obra };
+  const contexto = { usuario: estado.usuario, dataBase: estado.dataBase, recarregar: renderizar, obra: estado.obra,
+                     obras: estado.obras };
   try {
     if (!estado.obra) {
       await inicio.render(conteudo, { ...contexto, aoMudarObras: recarregarObras });

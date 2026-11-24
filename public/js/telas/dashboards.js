@@ -208,6 +208,9 @@ function cartaoGasto(d) {
 }
 
 // ------------------------------------------------------------------ 3. recebimentos
+// Obra sem investidor: a série dele só aparece se mesmo assim houver valor lançado.
+const comInvestidor = (d) => d.participacao?.com_investidor !== false || d.recebimentos.some((x) => x.investidor);
+
 function cartaoRecebimentos(d) {
   const r = d.recebimentos.slice(-12);
   const total = soma(r, (x) => x.investidor + x.holding + x.receitas);
@@ -215,8 +218,8 @@ function cartaoRecebimentos(d) {
   return cartao('span-6', 'Recebimentos',
     `Últimos ${r.length} meses · ${fmt.moeda(total)} no período · ${fmt.mesLongo(mes?.mes)}: ${fmt.moeda(mes ? mes.investidor + mes.holding + mes.receitas : 0)}`,
     `<div class="grafico-area" id="g-recebimentos"></div>
-     ${legenda([[COR.c1, 'Aporte do investidor'], [COR.c2, 'Aporte da holding / Joy+'], [COR.c3, 'Receitas (rendimentos)']])}
-     ${tabelaMeses(r.map((x) => x.mes), [{ rotulo: 'Investidor', valores: r.map((x) => x.investidor) },
+     ${legenda([...(comInvestidor(d) ? [[COR.c1, 'Aporte do investidor']] : []), [COR.c2, 'Aporte da holding / Joy+'], [COR.c3, 'Receitas (rendimentos)']])}
+     ${tabelaMeses(r.map((x) => x.mes), [...(comInvestidor(d) ? [{ rotulo: 'Investidor', valores: r.map((x) => x.investidor) }] : []),
         { rotulo: 'Holding / Joy+', valores: r.map((x) => x.holding) }, { rotulo: 'Receitas', valores: r.map((x) => x.receitas) }])}`);
 }
 
@@ -310,7 +313,7 @@ export async function render(el, ctx) {
       { rotulo: 'Gasto', cor: COR.c1, valores: seriesSetor(d, estado.setorGasto, 'incorrido', meses) }], L));
     const r = d.recebimentos.slice(-12);
     montarGrafico(el.querySelector('#g-recebimentos'), (L) => graficoBarras(r.map((x) => x.mes), [
-      { rotulo: 'Investidor', cor: COR.c1, valores: r.map((x) => x.investidor) },
+      ...(comInvestidor(d) ? [{ rotulo: 'Investidor', cor: COR.c1, valores: r.map((x) => x.investidor) }] : []),
       { rotulo: 'Holding / Joy+', cor: COR.c2, valores: r.map((x) => x.holding) },
       { rotulo: 'Receitas', cor: COR.c3, valores: r.map((x) => x.receitas) }], L, { empilhado: true, altura: 240 }));
     el.querySelectorAll('[data-chips]').forEach((grupo) => grupo.querySelectorAll('[data-valor]').forEach((b) => (b.onclick = () => {

@@ -503,3 +503,92 @@ def test_cadastro_completo_com_viabilidade_e_linhas_copiadas(ambiente):
     assert nomes("brooklin") == nomes("evans")                 # linhas copiadas da Evans
     assert any(c["codigo"] == "brooklin" for c in adm.get(f"/api/inicio?data={HOJE}").json())
     assert adm.post("/api/obras", json={"codigo": "x2", "nome": "X", "linhas_de": "nao-existe"}).status_code == 422
+
+
+def test_viabilidade_editada_por_obra(ambiente):
+    """Salvar a viabilidade de uma obra não mexe na das outras, e o Resumo usa a da própria obra."""
+    adm = cliente(ambiente, "edu.adm")
+    if adm.get("/api/obras/brooklin/parametros").status_code == 404:
+        assert adm.post("/api/obras", json={"codigo": "brooklin", "nome": "Brooklin"}).status_code == 200
+    evans_antes = adm.get("/api/obras/evans/parametros").json()["viabilidade"]
+    params = adm.get("/api/obras/brooklin/parametros").json()
+    assert set(params["grupos"]) == {"Despesas", "Custos"}
+    r = adm.put("/api/obras/brooklin/parametros/viabilidade", json={"Terreno": 1_234_567.891})
+    assert r.status_code == 200
+    assert adm.get("/api/obras/brooklin/parametros").json()["viabilidade"]["Terreno"] == 1_234_567.891
+    assert adm.get("/api/obras/evans/parametros").json()["viabilidade"] == evans_antes
+    assert adm.put("/api/obras/brooklin/parametros/viabilidade", json={"Inexistente": 1}).status_code == 422
+
+
+def test_rubricas_por_obra(ambiente):
+    """Cada obra tem a sua lista de rubricas: criar, renomear e excluir mexe só nela, e o
+    Resumo/Painel seguem a lista (rubrica nova entra no fim do grupo, sem deslocar as da planilha)."""
+    adm = cliente(ambiente, "edu.adm")
+    if adm.get("/api/obras/brooklin/parametros").status_code == 404:
+        assert adm.post("/api/obras", json={"codigo": "brooklin", "nome": "Brooklin"}).status_code == 200
+    grupos = adm.get("/api/obras/brooklin/parametros").json()["grupos"]
+    evans_antes = adm.get("/api/obras/evans/parametros").json()
+    lista = [{"nome": n, "grupo": g, "nome_anterior": n}
+             for titulo, g in (("Despesas", "despesa"), ("Custos", "custo")) for n in grupos[titulo]]
+    lista = [r for r in lista if r["nome"] != "Outorga"]                               # exclui
+    for r in lista:
+        if r["nome"] == "Projetos":
+            r["nome"] = "Projetos e Aprovações"                                        # renomeia
+    lista.append({"nome": "Paisagismo", "grupo": "custo"})                            # cria
+    r = adm.put("/api/obras/brooklin/parametros/rubricas",
+                json={"rubricas": lista, "viabilidade": {"Paisagismo": 50_000, "Projetos e Aprovações": 10}})
+    assert r.status_code == 200, r.text
+    params = adm.get("/api/obras/brooklin/parametros").json()
+    assert "Outorga" not in params["viabilidade"] and "Projetos" not in params["viabilidade"]
+    assert params["viabilidade"]["Paisagismo"] == 50_000
+    assert params["grupos"]["Custos"][-1] == "Paisagismo"
+    assert adm.get("/api/obras/evans/parametros").json() == evans_antes                # Evans intacta
+
+    resumo = adm.get(f"/api/obras/brooklin/resumo?data={HOJE}").json()
+    paisagismo = next(l for l in resumo["linhas"] if l["rubrica"] == "Paisagismo")
+    assert paisagismo["grupo"] == "custo" and 39 < paisagismo["linha_excel"] < 40
+    assert not any(l["rubrica"] == "Outorga" for l in resumo["linhas"])
+    assert math.isclose(resumo["total"]["viabilidade"], sum(params["viabilidade"].values()))
+    painel = adm.get(f"/api/obras/brooklin/painel?data={HOJE}").json()
+    assert any(l["rotulo"] == "Paisagismo" and 56 < l["linha_excel"] < 59 for l in painel["linhas"])
+    rubricas_projecao = [x["rubrica"] for x in adm.get(f"/api/obras/brooklin/projecao?data={HOJE}").json()["rubricas"]]
+    assert "Paisagismo" in rubricas_projecao
+
+    # Rubrica em uso por linha de projeção ativa não pode ser excluída
+    setor = adm.get("/api/obras/brooklin/setores").json()[0]
+    assert adm.post("/api/obras/brooklin/linhas", json={"setor_id": setor["id"], "nome": "PAISAGISMO | X",
+                                                         "rubrica": "Paisagismo"}).status_code == 200
+    sem = [r for r in lista if r["nome"] != "Paisagismo"]
+    for r in sem:
+        r["nome_anterior"] = r["nome"]
+    r = adm.put("/api/obras/brooklin/parametros/rubricas", json={"rubricas": sem})
+    assert r.status_code == 422 and "Paisagismo" in r.json()["detail"]
+    repetida = sem + [{"nome": "Paisagismo", "grupo": "custo", "nome_anterior": "Paisagismo"},
+                      {"nome": "paisagismo", "grupo": "custo"}]
+    r = adm.put("/api/obras/brooklin/parametros/rubricas", json={"rubricas": repetida})
+    assert r.status_code == 422 and "repetida" in r.json()["detail"]
+
+
+def test_divisao_do_aporte_por_obra(ambiente):
+    """Percentuais Joy+ × investidor por obra; obra sem investidor = aporte 100% Joy+."""
+    adm = cliente(ambiente, "edu.adm")
+    r = adm.post("/api/obras", json={"codigo": "solo-joy", "nome": "Solo Joy", "participacao_investidor": 0})
+    assert r.status_code == 200, r.text
+    premissas = adm.get("/api/obras/solo-joy/parametros").json()["premissas"]
+    assert premissas["participacao_investidor"] == 0 and premissas["participacao_joy"] == 1
+    resumo = adm.get(f"/api/obras/solo-joy/resumo?data={HOJE}").json()
+    assert resumo["participacao"] == {"investidor": 0, "joy": 1, "com_investidor": False}
+    assert resumo["aporte_mes"]["investidor"] == 0
+    assert math.isclose(resumo["aporte_mes"]["joy"], resumo["aporte_mes"]["aporte_total"])
+    assert adm.get(f"/api/obras/solo-joy/aportes?data={HOJE}").json()["participacao"]["com_investidor"] is False
+    card = next(c for c in adm.get(f"/api/inicio?data={HOJE}").json() if c["codigo"] == "solo-joy")
+    assert card["com_investidor"] is False
+
+    # Evans: 85/15 por padrão; mudar uma obra não muda a outra; precisa somar 100%
+    assert adm.get(f"/api/obras/evans/resumo?data={HOJE}").json()["participacao"]["investidor"] == 0.85
+    assert adm.put("/api/obras/solo-joy/parametros/premissas",
+                   json={"participacao_investidor": 0.6, "participacao_joy": 0.3}).status_code == 422
+    r = adm.put("/api/obras/solo-joy/parametros/premissas", json={"participacao_investidor": 0.7})
+    assert r.status_code == 200 and math.isclose(r.json()["participacao_joy"], 0.3)
+    assert adm.get(f"/api/obras/evans/resumo?data={HOJE}").json()["participacao"]["investidor"] == 0.85
+    assert adm.post("/api/obras", json={"codigo": "x-pct", "nome": "X", "participacao_investidor": 1.5}).status_code == 422

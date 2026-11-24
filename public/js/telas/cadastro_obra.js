@@ -18,10 +18,13 @@ export function abrirCadastro({ obra = null, obras = [], aoSalvar }) {
       nome: obra?.nome || '', codigo: obra?.codigo || '', empresa_spe: obra?.empresa_spe ?? '',
       cliente_investidor: obra?.cliente_investidor ?? '', historico_aporte_investidor: obra?.historico_aporte_investidor || '',
       graph_item_id: obra?.graph_item_id || '', arquivo_excel: obra?.arquivo_excel || '',
+      com_investidor: edicao ? Boolean(obra?.cliente_investidor || obra?.historico_aporte_investidor) : true,
+      participacao_investidor: 85,                         // % do aporte (só no cadastro; depois em Premissas)
       abas: { ...(obra?.abas || {}) }, ordem: obra?.ordem ?? obras.length, ativo: obra?.ativo !== false,
     },
     codigoManual: edicao,
     viabilidade: null,                                     // rubrica → valor (carregado no passo 2)
+    rubricasDe: obras[0]?.codigo || null,                  // a obra nova nasce com as rubricas desta obra
     linhasDe: 'padrao',
     arquivos: null,
   };
@@ -53,8 +56,13 @@ export function abrirCadastro({ obra = null, obras = [], aoSalvar }) {
           <select name="graph_item_id"><option value="">Carregando arquivos…</option></select>
           <small>Mesmo modelo do arquivo da Evans (BD´s_JOY_&lt;OBRA&gt;).</small></div>
         ${campo('empresa_spe', 'Empresa SPE (código no UAU)', d.empresa_spe, 'inputmode="numeric" placeholder="Ex.: 67"')}
-        ${campo('cliente_investidor', 'Cliente investidor (Recebidas)', d.cliente_investidor, 'inputmode="numeric"', 'Código do cliente cujos recebimentos são aporte')}
-        ${campo('historico_aporte_investidor', 'Histórico do aporte (Controle Entradas)', d.historico_aporte_investidor, '', 'Texto exato do lançamento de aporte do investidor')}
+        <label class="row-flex campo-largo" style="gap:8px"><input type="checkbox" name="com_investidor" ${d.com_investidor ? 'checked' : ''} />
+          Obra com investidor <span class="muted">(sem investidor, o aporte é 100% Joy+)</span></label>
+        <div class="campo-largo grid form-obra campos-investidor" ${d.com_investidor ? '' : 'hidden'}>
+          ${edicao ? '' : campo('participacao_investidor', 'Investidor (% do aporte)', d.participacao_investidor, 'inputmode="decimal"', 'A Joy+ fica com o restante. Depois, ajuste em Resumo › Premissas.')}
+          ${campo('cliente_investidor', 'Cliente investidor (Recebidas)', d.cliente_investidor, 'inputmode="numeric"', 'Código do cliente cujos recebimentos são aporte')}
+          ${campo('historico_aporte_investidor', 'Histórico do aporte (Controle Entradas)', d.historico_aporte_investidor, '', 'Texto exato do lançamento de aporte do investidor')}
+        </div>
       </div>
       <details class="avancado"><summary>Opções avançadas</summary>
         <div class="grid form-obra" style="margin-top:12px">
@@ -70,6 +78,9 @@ export function abrirCadastro({ obra = null, obras = [], aoSalvar }) {
     const codigo = corpo.querySelector('[name=codigo]');
     nome.addEventListener('input', () => { if (!estado.codigoManual) codigo.value = codigoDe(nome.value); });
     codigo.addEventListener('input', () => { estado.codigoManual = true; });
+    corpo.querySelector('[name=com_investidor]').addEventListener('change', (e) => {
+      corpo.querySelector('.campos-investidor').hidden = !e.target.checked;
+    });
     nome.focus();
 
     const seletor = corpo.querySelector('[name=graph_item_id]');
@@ -91,6 +102,8 @@ export function abrirCadastro({ obra = null, obras = [], aoSalvar }) {
     const d = estado.dados;
     Object.assign(d, {
       nome: v('nome'), codigo: edicao ? d.codigo : v('codigo'), graph_item_id: v('graph_item_id'),
+      com_investidor: corpo.querySelector('[name=com_investidor]').checked,
+      participacao_investidor: edicao ? d.participacao_investidor : lerNumero(v('participacao_investidor')),
       empresa_spe: v('empresa_spe'), cliente_investidor: v('cliente_investidor'),
       historico_aporte_investidor: v('historico_aporte_investidor'), arquivo_excel: v('arquivo_excel'),
       ordem: Number(v('ordem') || 0), ativo: edicao ? corpo.querySelector('[name=ativo]')?.checked !== false : true,
@@ -101,6 +114,9 @@ export function abrirCadastro({ obra = null, obras = [], aoSalvar }) {
     if (!edicao && obras.some((o) => o.codigo === d.codigo)) throw new Error(`Já existe uma obra com o código "${d.codigo}".`);
     if (d.empresa_spe && !/^\d+$/.test(String(d.empresa_spe))) throw new Error('Empresa SPE precisa ser um número.');
     if (d.cliente_investidor && !/^\d+$/.test(String(d.cliente_investidor))) throw new Error('Cliente investidor precisa ser um número.');
+    if (!edicao && d.com_investidor && !(d.participacao_investidor > 0 && d.participacao_investidor <= 100)) {
+      throw new Error('Participação do investidor: informe um percentual entre 0 e 100.');
+    }
   }
 
   // ---------------------------------------------------------------- passo 2: viabilidade
@@ -117,10 +133,10 @@ export function abrirCadastro({ obra = null, obras = [], aoSalvar }) {
       estado.viabilidade = Object.fromEntries(Object.keys(referencia).map((r) => [r, 0]));
     }
     const rubricas = Object.keys(estado.viabilidade);
-    corpo.innerHTML = `<p>Valor previsto na viabilidade (EVE) para cada rubrica. Pode ajustar depois em API's › Viabilidade.</p>
+    corpo.innerHTML = `<p>Valor previsto na viabilidade (EVE) para cada rubrica. Pode ajustar depois no botão "Viabilidade" do Resumo da obra.</p>
       <div class="row-flex" style="margin:12px 0">
         <label class="row-flex muted" style="gap:6px">Copiar de
-          <select class="campo" id="copiar-viab" style="width:auto">${obras.map((o) => `<option value="${esc(o.codigo)}">${esc(o.nome)}</option>`).join('')}</select></label>
+          <select class="campo" id="copiar-viab" style="width:auto">${obras.map((o) => `<option value="${esc(o.codigo)}" ${o.codigo === estado.rubricasDe ? 'selected' : ''}>${esc(o.nome)}</option>`).join('')}</select></label>
         <button class="btn secondary sm" id="aplicar-copia">Copiar valores</button>
         <button class="btn ghost sm" id="zerar">Zerar</button>
         <span class="total-viab">Total <b id="total-viab"></b></span>
@@ -129,7 +145,8 @@ export function abrirCadastro({ obra = null, obras = [], aoSalvar }) {
         <input data-rubrica="${esc(r)}" data-exato="${estado.viabilidade[r] || 0}" value="${estado.viabilidade[r] ? fmt.numero(estado.viabilidade[r]) : ''}" inputmode="decimal" placeholder="0,00" /></div>`).join('')}</div>`;
     const somar = () => {
       const total = [...corpo.querySelectorAll('[data-rubrica]')].reduce((a, i) => a + (valorDoCampo(i) || 0), 0);
-      corpo.querySelector('#total-viab').textContent = fmt.moeda(total);
+      const alvo = corpo.querySelector('#total-viab');
+      if (alvo) alvo.textContent = fmt.moeda(total);   // o ouvinte fica no corpo do assistente nos outros passos
     };
     corpo.addEventListener('input', somar);
     corpo.querySelector('#zerar').onclick = () => { corpo.querySelectorAll('[data-rubrica]').forEach((i) => { i.value = ''; i.dataset.exato = 0; }); somar(); };
@@ -141,6 +158,14 @@ export function abrirCadastro({ obra = null, obras = [], aoSalvar }) {
           i.value = v ? fmt.numero(v) : '';
           i.dataset.exato = v || 0;                 // valor completo (o campo mostra 2 casas)
         });
+        const origem = corpo.querySelector('#copiar-viab').value;
+        const mesmas = Object.keys(viabilidade).join('|') === Object.keys(estado.viabilidade).join('|');
+        if (!mesmas) {                              // outra lista de rubricas: a obra nova herda a da origem
+          estado.viabilidade = { ...viabilidade };
+          estado.rubricasDe = origem;
+          return passoViabilidade();
+        }
+        estado.rubricasDe = origem;
         somar();
       } catch (erro) { erroToast(erro); }
     };
@@ -184,10 +209,14 @@ export function abrirCadastro({ obra = null, obras = [], aoSalvar }) {
   // ---------------------------------------------------------------- salvar e primeira carga
   async function salvar() {
     const d = estado.dados;
-    const corpoPedido = { ...d, empresa_spe: d.empresa_spe || null, cliente_investidor: d.cliente_investidor || null,
-      historico_aporte_investidor: d.historico_aporte_investidor || null, graph_item_id: d.graph_item_id || null,
+    const { com_investidor: comInvestidor, participacao_investidor: pct, ...dados } = d;
+    const corpoPedido = { ...dados, empresa_spe: d.empresa_spe || null,
+      cliente_investidor: (comInvestidor && d.cliente_investidor) || null,
+      historico_aporte_investidor: (comInvestidor && d.historico_aporte_investidor) || null, graph_item_id: d.graph_item_id || null,
       arquivo_excel: d.arquivo_excel || null };
-    if (!edicao) Object.assign(corpoPedido, { viabilidade: estado.viabilidade, linhas_de: estado.linhasDe });
+    if (!edicao) corpoPedido.participacao_investidor = comInvestidor ? pct / 100 : 0;
+    if (!edicao) Object.assign(corpoPedido, { viabilidade: estado.viabilidade, linhas_de: estado.linhasDe,
+                                              rubricas_de: estado.rubricasDe });
     await api('/api/obras', { metodo: 'POST', corpo: corpoPedido });
     if (edicao || !d.graph_item_id) {
       toast(edicao ? 'Obra atualizada' : 'Obra criada', { texto: d.graph_item_id ? '' : 'Escolha o arquivo de dados para carregar a obra.' });

@@ -19,7 +19,8 @@ function cartaoObra(c, podeGerenciar) {
     <div class="cartao-obra-aporte">
       <span class="l">Aporte necessário · ${fmt.mesLongo(c.mes)}</span>
       <span class="v">${aporte}</span>
-      ${ehNumero(c.investidor) ? `<span class="h">Investidor ${fmt.moeda(c.investidor)} · Joy+ ${fmt.moeda(c.joy)}</span>` : ''}
+      ${!ehNumero(c.joy) ? '' : c.com_investidor === false ? `<span class="h">100% Joy+ · obra sem investidor</span>`
+        : `<span class="h">Investidor ${fmt.moeda(c.investidor)} · Joy+ ${fmt.moeda(c.joy)}</span>`}
     </div>
     <dl class="cartao-obra-numeros">
       <div><dt>Custo do mês</dt><dd>${fmt.moeda(c.custo_mes)}</dd></div>

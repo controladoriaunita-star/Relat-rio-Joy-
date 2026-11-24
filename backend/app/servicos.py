@@ -18,7 +18,8 @@ import requests
 from . import auth, config
 from .catalogo import (INICIO_LINHA_DO_TEMPO, MESES_LINHA_DO_TEMPO, PAPEIS_GERAIS, PAPEL_ADMIN, PERMISSOES,
                        PERMISSOES_PADRAO, PERMISSOES_SETOR, RUBRICAS, SETORES_PADRAO, VIABILIDADE_PADRAO,
-                       Premissas)
+                       GRUPOS_RUBRICA, MAX_RUBRICAS_NOVAS, Premissas, Rubrica, config_rubricas_padrao,
+                       montar_rubricas)
 from .db import Banco, agora, para_json
 from .excel_funcoes import chave_texto, como_data, eomonth, meses_entre, texto_igual
 from .fontes.definicoes import FONTES, FONTES_POR_CODIGO
@@ -30,7 +31,7 @@ from .motor.aportes import aportes_ate
 from .motor.base import Base, LinhaProjecao
 from .motor.painel import calcular_painel
 from .motor.resumo import calcular_resumo, saldo_fim_de_mes
-from .obras import CODIGO_VALIDO, OBRAS_PADRAO, Obra
+from .obras import CODIGO_VALIDO, OBRA_PADRAO, OBRAS_PADRAO, Obra
 
 TIPO_PROJETADO = "Projetado"
 TIPO_PROJETADO_TOTAL = "Projetado Total"
@@ -38,6 +39,10 @@ TIPO_PROJETADO_TOTAL = "Projetado Total"
 
 class ErroNegocio(Exception):
     """Erro de validação com mensagem para o usuário."""
+
+
+class ErroConfirmacao(ErroNegocio):
+    """Ação possível, mas que precisa de confirmação explícita (reenviar com forcar)."""
 
 
 class ObraNaoEncontrada(ErroNegocio):
@@ -132,8 +137,20 @@ class Servico:
         except (TypeError, ValueError) as erro:
             raise ErroNegocio("Empresa, cliente e ordem precisam ser números inteiros.") from erro
         nova = not self.banco.um("SELECT 1 FROM obras WHERE codigo = ?", codigo)
+        participacao = dados.get("participacao_investidor")
+        if participacao is not None:
+            try:
+                participacao = float(participacao)
+            except (TypeError, ValueError) as erro:
+                raise ErroNegocio("Participação do investidor inválida.") from erro
+            if not 0 <= participacao <= 1:
+                raise ErroNegocio("A participação do investidor deve estar entre 0% e 100%.")
         viabilidade = dados.get("viabilidade") or {}
-        if set(viabilidade) - set(RUBRICAS):
+        rubricas_de = dados.get("rubricas_de") if nova else None
+        if rubricas_de and not self.banco.um("SELECT 1 FROM obras WHERE codigo = ?", rubricas_de):
+            raise ErroNegocio("Obra de origem das rubricas não encontrada.")
+        nomes = self.obra(rubricas_de).nomes_rubricas() if rubricas_de else RUBRICAS
+        if nova and set(viabilidade) - set(nomes):
             raise ErroNegocio("Viabilidade com rubrica desconhecida.")
         linhas_de = dados.get("linhas_de") or "padrao"
         if nova and linhas_de != "padrao" and not self.banco.um("SELECT 1 FROM obras WHERE codigo = ?", linhas_de):
@@ -148,10 +165,15 @@ class Servico:
         if nova:
             # A obra nova nasce com a viabilidade informada (zero no que faltar), não com a da Evans,
             # e com as linhas de projeção do modelo padrão ou copiadas de outra obra.
-            servico_obra.salvar_viabilidade({r: float(viabilidade.get(r) or 0) for r in RUBRICAS}, autor)
+            if rubricas_de:
+                self.banco.salvar_parametro(codigo, "rubricas", self.obra(rubricas_de).config_rubricas())
+            servico_obra.salvar_viabilidade({r: float(viabilidade.get(r) or 0) for r in nomes}, autor)
             if linhas_de != "padrao":
                 servico_obra.copiar_linhas_de(self.obra(linhas_de))
         servico_obra.inicializar()
+        if nova and dados.get("participacao_investidor") is not None:
+            # Obra sem investidor: 0 (o aporte é 100% Joy+).
+            servico_obra.salvar_premissas({"participacao_investidor": participacao}, autor)
         self._semear_permissoes()
         return obra
 
@@ -179,6 +201,7 @@ class Servico:
                 card.update({
                     "mes": resumo["datas"]["mes_atual"], "aporte_total": aporte.get("aporte_total"),
                     "investidor": aporte.get("investidor"), "joy": aporte.get("joy"),
+                    "com_investidor": resumo["participacao"]["com_investidor"],
                     "custo_mes": aporte.get("custo_mes"), "saldo_anterior": aporte.get("saldo_anterior"),
                     "viabilidade": resumo["total"]["viabilidade"],
                     "pago_total": (resumo["total"].get("pago_ate") or 0) + (resumo["total"].get("pago_mes") or 0),
@@ -325,7 +348,7 @@ class ServicoObra:
         if self.banco.parametro(self.codigo, "premissas") is None:
             self.banco.salvar_parametro(self.codigo, "premissas", Premissas().como_dict())
         if self.banco.parametro(self.codigo, "viabilidade") is None:
-            self.banco.salvar_parametro(self.codigo, "viabilidade", VIABILIDADE_PADRAO)
+            self.banco.salvar_parametro(self.codigo, "viabilidade", self._viabilidade_inicial())
 
     def copiar_linhas_de(self, origem: "ServicoObra") -> None:
         """Setores e linhas de projeção (sem valores) iguais aos de outra obra; só se esta ainda não tem setores."""
@@ -349,8 +372,96 @@ class ServicoObra:
         validos = {f.name for f in fields(Premissas)}
         return Premissas(**{k: v for k, v in dados.items() if k in validos})
 
+    def _viabilidade_inicial(self) -> dict[str, float]:
+        """Valores da planilha só para a obra de origem (Evans); as demais começam zeradas."""
+        if self.codigo == OBRA_PADRAO:
+            return dict(VIABILIDADE_PADRAO)
+        return {rubrica: 0.0 for rubrica in RUBRICAS}
+
     def viabilidade(self) -> dict[str, float]:
-        return {**VIABILIDADE_PADRAO, **self.banco.parametro(self.codigo, "viabilidade", {})}
+        """Viabilidade (EVE) por rubrica da obra, na ordem do relatório; sem valor salvo = valor inicial."""
+        salva = self.banco.parametro(self.codigo, "viabilidade", {})
+        inicial = self._viabilidade_inicial()
+        return {nome: float(salva.get(nome, inicial.get(nome, 0.0))) for nome in self.nomes_rubricas()}
+
+    # ---------------------------------------------------------------- rubricas da obra
+    def config_rubricas(self) -> list[dict]:
+        return self.banco.parametro(self.codigo, "rubricas") or config_rubricas_padrao()
+
+    def rubricas(self) -> list[Rubrica]:
+        return montar_rubricas(self.config_rubricas())
+
+    def nomes_rubricas(self) -> list[str]:
+        return [r.nome for r in self.rubricas()]
+
+    def grupos_rubricas(self) -> dict[str, list[str]]:
+        rubricas = self.rubricas()
+        return {"Despesas": [r.nome for r in rubricas if r.grupo == "despesa"],
+                "Custos": [r.nome for r in rubricas if r.grupo == "custo"]}
+
+    def salvar_rubricas(self, lista: list[dict], viabilidade: dict | None, usuario: dict,
+                        forcar: bool = False) -> dict:
+        """Rubricas da obra, na ordem: [{nome, grupo, nome_anterior?}] e, junto, a viabilidade.
+
+        Renomear leva junto a viabilidade, as linhas de projeção e as classificações do DePara
+        desta obra. Excluir é recusado se houver linha de projeção ativa na rubrica; com
+        lançamentos classificados nela, só com `forcar` (eles deixam de aparecer no relatório)."""
+        atuais = {r.nome: r for r in self.rubricas()}
+        nova_config, vistos, renomes, origem_de = [], set(), {}, {}
+        for item in lista:
+            nome = " ".join(str(item.get("nome") or "").split())
+            grupo = item.get("grupo")
+            if not nome or grupo not in GRUPOS_RUBRICA:
+                raise ErroNegocio("Cada rubrica precisa de nome e grupo (despesa ou custo).")
+            if chave_texto(nome) in vistos:
+                raise ErroNegocio(f'Rubrica repetida: "{nome}".')
+            vistos.add(chave_texto(nome))
+            anterior = item.get("nome_anterior")
+            origem = atuais.get(anterior) if anterior else None
+            if anterior and not origem:
+                raise ErroNegocio(f'Rubrica "{anterior}" não existe nesta obra.')
+            if origem:
+                origem_de[nome] = anterior
+                if anterior != nome:
+                    renomes[anterior] = nome
+            padrao = origem.padrao if origem and origem.grupo == grupo else None
+            nova_config.append({"nome": nome, "grupo": grupo, "padrao": padrao})
+        for grupo in GRUPOS_RUBRICA:
+            if sum(1 for c in nova_config if c["grupo"] == grupo and not c["padrao"]) > MAX_RUBRICAS_NOVAS:
+                raise ErroNegocio(f"Limite de {MAX_RUBRICAS_NOVAS} rubricas novas por grupo.")
+        removidas = [n for n in atuais if n not in origem_de.values()]
+        if removidas:
+            em_uso = {l["rubrica"] for l in self.banco.todos(
+                "SELECT DISTINCT l.rubrica FROM linhas_projecao l JOIN setores s ON s.id = l.setor_id "
+                "WHERE s.obra = ? AND l.ativo = 1", self.codigo)}
+            usadas = sorted(em_uso & set(removidas))
+            if usadas:
+                raise ErroNegocio("Há linhas de projeção ativas em: " + ", ".join(usadas)
+                                  + ". Mude a rubrica dessas linhas (aba Projeção) antes de excluir.")
+            classificadas = sorted({d["classificacao"] for d in self.banco.todos(
+                "SELECT DISTINCT classificacao FROM depara WHERE obra = ?", self.codigo)} & set(removidas))
+            if classificadas and not forcar:
+                raise ErroConfirmacao("Há lançamentos classificados (DePara) em: " + ", ".join(classificadas)
+                                      + ". Ao excluir, eles deixam de aparecer no relatório desta obra.")
+        viab_atual = self.viabilidade()
+        nova_viab = {c["nome"]: viab_atual.get(origem_de.get(c["nome"], ""), 0.0) for c in nova_config}
+        for nome, valor in (viabilidade or {}).items():
+            if nome not in nova_viab:
+                raise ErroNegocio(f"Rubricas desconhecidas: {nome}")
+            nova_viab[nome] = float(valor)
+        with self.banco.transacao() as con:
+            for chave, valor in (("rubricas", nova_config), ("viabilidade", nova_viab)):
+                con.execute("INSERT INTO parametros (obra, chave, valor) VALUES (?, ?, ?) "
+                            "ON CONFLICT (obra, chave) DO UPDATE SET valor = excluded.valor",
+                            (self.codigo, chave, para_json(valor)))
+            for antigo, novo in renomes.items():
+                con.execute("UPDATE linhas_projecao SET rubrica = ? WHERE rubrica = ? AND setor_id IN "
+                            "(SELECT id FROM setores WHERE obra = ?)", (novo, antigo, self.codigo))
+                con.execute("UPDATE depara SET classificacao = ? WHERE classificacao = ? AND obra = ?",
+                            (novo, antigo, self.codigo))
+            self._registrar(con, usuario, "rubricas.salvar",
+                            {"rubricas": nova_config, "renomeadas": renomes, "removidas": removidas})
+        return {"rubricas": nova_config, "viabilidade": self.viabilidade()}
 
     def salvar_premissas(self, dados: dict, usuario: dict) -> Premissas:
         atual = self.premissas().como_dict()
@@ -364,6 +475,13 @@ class ServicoObra:
             else:
                 valor = float(valor)
             atual[chave] = valor
+        if "participacao_investidor" in dados or "participacao_joy" in dados:
+            pi = atual["participacao_investidor"]
+            if "participacao_joy" not in dados:          # informou só o investidor: Joy+ completa 100%
+                atual["participacao_joy"] = round(1 - pi, 10)
+            pj = atual["participacao_joy"]
+            if not (0 <= pi <= 1 and 0 <= pj <= 1) or abs(pi + pj - 1) > 1e-9:
+                raise ErroNegocio("A divisão do aporte precisa somar 100% (investidor + Joy+).")
         self.banco.salvar_parametro(self.codigo, "premissas", atual)
         with self.banco.transacao() as con:
             self._registrar(con, usuario, "premissas.salvar", dados)
@@ -404,7 +522,7 @@ class ServicoObra:
         return self.premissas()
 
     def salvar_viabilidade(self, dados: dict[str, float], usuario: dict | None) -> dict:
-        desconhecidas = set(dados) - set(RUBRICAS)
+        desconhecidas = set(dados) - set(self.nomes_rubricas())
         if desconhecidas:
             raise ErroNegocio(f"Rubricas desconhecidas: {', '.join(sorted(desconhecidas))}")
         atual = {**self.viabilidade(), **{k: float(v) for k, v in dados.items()}}
@@ -447,7 +565,9 @@ class ServicoObra:
                 if carga and (ultima is None or carga["iniciado_em"] > ultima):
                     ultima = carga["iniciado_em"]
             self._cache.clear()
-            self._cache[chave] = montar_base(tabelas, self.depara(), self.projecao_para_motor(), ultima, self.obra)
+            base, resultados = montar_base(tabelas, self.depara(), self.projecao_para_motor(), ultima, self.obra)
+            base.rubricas = self.rubricas()                  # rubricas da obra (Resumo e Painel)
+            self._cache[chave] = (base, resultados)
         return self._cache[chave]
 
     def calcular(self, aba: str, hoje: date) -> dict:
@@ -526,7 +646,7 @@ class ServicoObra:
         caminho = self.obra.caminho_excel
         return {"graph_configurado": ClienteGraph.configurado() and bool(self.obra.graph_item_id),
                 "fontes": fontes, "excel_disponivel": bool(caminho and caminho.exists()),
-                "rubricas": RUBRICAS + ["Rendimentos ", "Aporte", "Aporte Holding",
+                "rubricas": self.nomes_rubricas() + ["Rendimentos ", "Aporte", "Aporte Holding",
                                         "Retorno de Aporte", "Retorno de Aporte Holding"]}
 
     @staticmethod
@@ -620,7 +740,7 @@ class ServicoObra:
     def salvar_linha(self, dados: dict, usuario: dict) -> int:
         nome = str(dados.get("nome", "")).strip()
         rubrica = dados.get("rubrica")
-        if not nome or rubrica not in RUBRICAS:
+        if not nome or rubrica not in self.nomes_rubricas():
             raise ErroNegocio("Nome e rubrica válida são obrigatórios.")
         if not self.banco.um("SELECT 1 FROM setores WHERE id = ? AND obra = ?", dados.get("setor_id"), self.codigo):
             raise ErroNegocio("Setor inválido.")
@@ -720,12 +840,14 @@ class ServicoObra:
                 "recebimentos": painel_dashboards.recebimentos(base, resumo["datas"]["mes_atual"]),
                 "setores": painel_dashboards.gasto_por_setor(base, self.setores(), projecoes),
                 "custos": painel_dashboards.custos_por_rubrica(resumo),
+                "participacao": resumo["participacao"],
                 "ultima_atualizacao": resumo["ultima_atualizacao"]}
 
     def aportes(self, hoje: date) -> dict:
         """Aportes feitos até a data-base (ver motor/aportes.py)."""
         base, _ = self.base()
-        return {**aportes_ate(base, hoje), "ultima_atualizacao": base.ultima_atualizacao}
+        return {**aportes_ate(base, hoje), "ultima_atualizacao": base.ultima_atualizacao,
+                "participacao": self.premissas().participacao()}
 
     def salvar_projecao(self, itens: list[dict], usuario: dict, hoje: date) -> int:
         mes_atual = eomonth(hoje)

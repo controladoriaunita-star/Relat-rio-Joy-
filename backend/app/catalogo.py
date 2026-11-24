@@ -47,12 +47,55 @@ CUSTOS = [
 ]
 VIABILIDADE_PADRAO = {nome: valor for nome, _, _, valor in DESPESAS + CUSTOS}
 RUBRICAS = [nome for nome, *_ in DESPESAS + CUSTOS]
+GRUPOS_RUBRICA = ("despesa", "custo")
+
+
+@dataclass(frozen=True)
+class Rubrica:
+    """Rubrica de custo/despesa de uma obra. `linha_resumo`/`linha_painel` posicionam a rubrica
+    no relatório: as do catálogo mantêm a linha da planilha; as criadas na obra entram no fim do
+    grupo com linha fracionária (22.01, 22.02… no Resumo), sem deslocar as linhas fixas."""
+    nome: str
+    grupo: str                       # "despesa" | "custo"
+    linha_resumo: float
+    linha_painel: float
+    padrao: str | None = None        # nome da rubrica do catálogo de origem (None = criada na obra)
+
+
+RUBRICAS_PADRAO = ([Rubrica(n, "despesa", r, p, n) for n, r, p, _ in DESPESAS]
+                   + [Rubrica(n, "custo", r, p, n) for n, r, p, _ in CUSTOS])
+# Última linha de cada grupo na planilha: as rubricas criadas na obra vêm logo depois.
+_FIM_GRUPO = {"despesa": (22, 76), "custo": (39, 56)}
+MAX_RUBRICAS_NOVAS = 99
+
+
+def config_rubricas_padrao() -> list[dict]:
+    return [{"nome": r.nome, "grupo": r.grupo, "padrao": r.padrao} for r in RUBRICAS_PADRAO]
+
+
+def montar_rubricas(config: list[dict] | None) -> list[Rubrica]:
+    """Rubricas da obra a partir da configuração salva ([{nome, grupo, padrao}], na ordem)."""
+    if not config:
+        return list(RUBRICAS_PADRAO)
+    do_catalogo = {r.padrao: r for r in RUBRICAS_PADRAO}
+    novas = {g: 0 for g in GRUPOS_RUBRICA}
+    saida = []
+    for item in config:
+        grupo, origem = item["grupo"], do_catalogo.get(item.get("padrao"))
+        if origem and origem.grupo == grupo:
+            saida.append(Rubrica(item["nome"], grupo, origem.linha_resumo, origem.linha_painel, origem.padrao))
+        else:
+            novas[grupo] += 1
+            resumo, painel = _FIM_GRUPO[grupo]
+            frac = novas[grupo] / 100
+            saida.append(Rubrica(item["nome"], grupo, round(resumo + frac, 2), round(painel + frac, 2)))
+    return sorted(saida, key=lambda r: r.linha_resumo)
 
 
 # --- Resumo ---------------------------------------------------------------------
 @dataclass(frozen=True)
 class LinhaResumo:
-    linha_excel: int
+    linha_excel: float             # inteira nas linhas da planilha; fracionária nas rubricas novas
     rotulo: str                    # coluna B
     grupo: str                     # "despesa" | "custo" | "aporte" | "vazia" | "subtotal"
     rotulo_pago_ate: str | None = None   # Resumo H40 usa a coluna A em vez da B
@@ -60,12 +103,14 @@ class LinhaResumo:
     viabilidade: bool = True       # coluna D/F existe
 
 
-def _linhas_resumo() -> list[LinhaResumo]:
-    linhas = [LinhaResumo(r, nome, "despesa") for nome, r, _, _ in DESPESAS]
+def linhas_resumo(rubricas: list[Rubrica] | None = None) -> list[LinhaResumo]:
+    """Linhas do Resumo para as rubricas da obra (sem rubricas = catálogo da planilha)."""
+    rubricas = RUBRICAS_PADRAO if rubricas is None else rubricas
+    linhas = [LinhaResumo(r.linha_resumo, r.nome, "despesa") for r in rubricas if r.grupo == "despesa"]
     linhas += [LinhaResumo(23, "", "vazia", tem_pago=False, viabilidade=False),
                LinhaResumo(24, "Total de Despesas ", "subtotal", tem_pago=False),
                LinhaResumo(25, "", "vazia", tem_pago=False, viabilidade=False)]
-    linhas += [LinhaResumo(r, nome, "custo") for nome, r, _, _ in CUSTOS]
+    linhas += [LinhaResumo(r.linha_resumo, r.nome, "custo") for r in rubricas if r.grupo == "custo"]
     linhas += [LinhaResumo(40, "Retorno de Aporte Investidor", "aporte",
                            rotulo_pago_ate="Retorno de Aporte", viabilidade=False),
                LinhaResumo(41, "Retorno de Aporte Holding", "aporte", viabilidade=False),
@@ -74,7 +119,7 @@ def _linhas_resumo() -> list[LinhaResumo]:
     return linhas
 
 
-LINHAS_RESUMO = _linhas_resumo()
+LINHAS_RESUMO = linhas_resumo()
 
 
 # --- Premissas manuais (células digitadas na planilha) ----------------------------
@@ -96,6 +141,15 @@ class Premissas:
 
     def como_dict(self) -> dict:
         return dict(self.__dict__)
+
+    @property
+    def com_investidor(self) -> bool:
+        return self.participacao_investidor > 0
+
+    def participacao(self) -> dict:
+        """Divisão do aporte da obra: obra sem investidor = 100% Joy+."""
+        return {"investidor": self.participacao_investidor, "joy": self.participacao_joy,
+                "com_investidor": self.com_investidor}
 
 
 # --- Painel -----------------------------------------------------------------------

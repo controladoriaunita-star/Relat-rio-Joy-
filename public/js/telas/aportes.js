@@ -6,11 +6,11 @@ let filtro = 'todos';     // todos | investidor | joy
 
 const ORIGEM = { investidor: 'Investidor', joy: 'Joy+' };
 
-function kpis(t) {
+function kpis(t, part) {
   const porEmpresa = Object.entries(t.joy_por_empresa).map(([nome, v]) => `${esc(nome)} ${fmt.moeda(v)}`).join(' · ');
   return `<div class="kpis">
     <div class="card kpi"><p class="l">Aporte investidores</p><p class="v">${fmt.moeda(t.investidor)}</p>
-      <p class="h">Aba Recebidas</p></div>
+      <p class="h">${part.com_investidor ? 'Aba Recebidas' : 'Obra sem investidor (aporte 100% Joy+)'}</p></div>
     <div class="card kpi"><p class="l">Aporte Joy+</p><p class="v">${fmt.moeda(t.joy)}</p>
       <p class="h">${porEmpresa}${t.nao_identificada ? ` · não identificada ${fmt.moeda(t.nao_identificada)}` : ''}</p></div>
     <div class="card kpi destaque"><p class="l">Aporte total (Joy+ e investidores)</p><p class="v">${fmt.moeda(t.geral)}</p>
@@ -60,7 +60,7 @@ export async function render(alvo, { dataBase, obra }) {
         <p class="muted" style="margin:4px 0 0">Investidores: aba Recebidas · Joy+: transferências de outras empresas para a SPE
         ${d.empresa_spe ? `(código UAU ${esc(d.empresa_spe)})` : '<span class="badge b-error">código UAU da obra não cadastrado</span>'}
         ${d.ultima_atualizacao ? ` · dados de ${fmt.dataHora(d.ultima_atualizacao)}` : ''}</p></div>
-      ${kpis(d.totais)}${avisoApontamentos(d.apontamentos)}${tabela(d.lancamentos)}</div>`;
+      ${kpis(d.totais, d.participacao)}${avisoApontamentos(d.apontamentos)}${tabela(d.lancamentos)}</div>`;
     alvo.querySelector('#filtro-aportes').onchange = (e) => { filtro = e.target.value; desenhar(); };
   };
   desenhar();

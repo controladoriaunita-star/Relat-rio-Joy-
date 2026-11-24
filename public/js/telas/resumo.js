@@ -1,6 +1,7 @@
 // Aba Resumo: reproduz a aba Resumo da planilha — tabela de custos e despesas por rubrica
 // (à esquerda) e o Relatório de Aporte (à direita). Tudo segue o mês da data-base.
 // Os gráficos ficam na aba Dashboards.
+import { editarViabilidade } from './viabilidade.js';
 import { api, carregando, ehNumero, esc, fmt, lerNumero, modal, toast } from '../util.js';
 
 const GRUPOS = [
@@ -65,10 +66,17 @@ const par = (rotulo, valor, classe = '') =>
 const moeda = (v) => fmt.moeda(v);
 const valorAporte = (v) => (v > 0 ? fmt.moeda(v) : 'Sem aporte');
 
-function divisao(a) {
+/** Rótulo da divisão do aporte da obra: "Investidor 85% · Joy+ 15%" ou "100% Joy+ (obra sem investidor)". */
+const rotuloDivisao = (p) => (p.com_investidor
+  ? `Investidor ${fmt.pct(p.investidor)} · Joy+ ${fmt.pct(p.joy)}` : '100% Joy+ · obra sem investidor');
+
+function divisao(a, p) {
   if (!(a.aporte_total > 0)) return '';
-  return `<div class="divisao-aporte"><div><span>Investidor (85%)</span><b>${moeda(a.investidor)}</b></div>
-    <div><span>Joy+ (15%)</span><b>${moeda(a.joy)}</b></div></div>`;
+  if (!p.com_investidor) {
+    return `<div class="divisao-aporte"><div><span>Joy+ (100% · obra sem investidor)</span><b>${moeda(a.joy)}</b></div></div>`;
+  }
+  return `<div class="divisao-aporte"><div><span>Investidor (${fmt.pct(p.investidor)})</span><b>${moeda(a.investidor)}</b></div>
+    <div><span>Joy+ (${fmt.pct(p.joy)})</span><b>${moeda(a.joy)}</b></div></div>`;
 }
 
 function blocoAporteMes(d) {
@@ -76,7 +84,7 @@ function blocoAporteMes(d) {
   return `<section class="card bloco-aporte destaque-aporte">
     <p class="sub">Aporte necessário no mês · ${fmt.mesLongo(d.datas.mes_atual)}</p>
     <p class="numero-heroi">${valorAporte(a.aporte_total)}</p>
-    ${divisao(a)}
+    ${divisao(a, d.participacao)}
     <div class="extrato">
       ${par(esc(d.titulos.saldo_anterior), moeda(a.saldo_anterior))}
       ${par('Receitas do mês (Recebidas)', moeda(a.receita_mes))}
@@ -108,7 +116,7 @@ function blocoProximo(d) {
   return `<section class="card bloco-aporte">
     <p class="sub">Aporte do próximo mês · ${fmt.mesLongo(d.datas.proximo_mes)}</p>
     <p class="numero-heroi menor">${valorAporte(p.aporte_total)}</p>
-    ${divisao(p)}
+    ${divisao(p, d.participacao)}
     <div class="extrato">
       ${par(esc(d.titulos.saldo_proximo), moeda(p.saldo_anterior))}
       ${par('Receita projetada', moeda(p.receita_projetada))}
@@ -130,7 +138,8 @@ function blocoCronograma(d, podeEditar) {
       <div class="parcela-topo"><span><b>${p.parcela}ª parcela</b> · ${fmt.data(p.data)}</span>
         ${rotulo ? `<span class="badge ${classe}">${rotulo}</span>` : ''}</div>
       <div class="parcela-valor"><b>${moeda(p.valor)}</b><span class="muted">${fmt.pct(p.percentual / 100)} do aporte</span></div>
-      <div class="par sub-par"><span>Investidor 85% · Joy+ 15%</span><b>${fmt.numero(p.investidor)} · ${fmt.numero(p.joy)}</b></div>
+      <div class="par sub-par"><span>${rotuloDivisao(d.participacao)}</span><b>${d.participacao.com_investidor
+        ? `${fmt.numero(p.investidor)} · ${fmt.numero(p.joy)}` : fmt.numero(p.joy)}</b></div>
     </div>`;
   }).join('');
   return `<section class="card bloco-aporte">
@@ -244,29 +253,56 @@ async function editarPremissas(recarregar) {
   const campo = (nome, rotulo, ajuda = '') => `<div class="field"><label>${rotulo}</label>
     <input name="${nome}" value="${fmt.numero(p[nome])}" inputmode="decimal" />${ajuda ? `<small>${ajuda}</small>` : ''}</div>`;
   const numericos = ['caixa_minimo', 'caixa_minimo_proximo', 'receita_projetada_proximo', 'ajuste_saldo_banco'];
-  modal({
+  const comInvestidor = p.participacao_investidor > 0;
+  const pctTexto = (v) => fmt.numero(v * 100).replace(/,00$/, '');
+  const caixa = modal({
     titulo: 'Premissas do aporte',
     conteudo: `<p>Valores informados manualmente. Custos, saldos e receitas do mês vêm das fontes.</p>
       <div class="grid" style="margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
         ${campo('caixa_minimo', 'Caixa mínimo (mês)')}${campo('caixa_minimo_proximo', 'Caixa mínimo (próximo)')}
         ${campo('receita_projetada_proximo', 'Receita projetada (próximo)')}
         ${campo('ajuste_saldo_banco', 'Ajuste do saldo banco', 'Painel H119')}
-      </div><p class="nota" style="margin-top:16px">O cronograma do aporte (parcelas e datas) fica no bloco "Cronograma do aporte".</p>`,
+      </div>
+      <fieldset class="grupo-viab" style="margin-top:16px"><legend>Divisão do aporte</legend>
+        <label class="row-flex" style="gap:8px"><input type="checkbox" name="com_investidor" ${comInvestidor ? 'checked' : ''} />
+          Obra com investidor</label>
+        <div class="grid divisao-campos" style="margin-top:10px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))" ${comInvestidor ? '' : 'hidden'}>
+          <div class="field"><label>Investidor (%)</label><input name="pct_investidor" inputmode="decimal" value="${pctTexto(p.participacao_investidor)}" /></div>
+          <div class="field"><label>Joy+ (%)</label><input name="pct_joy" value="${pctTexto(p.participacao_joy)}" disabled /></div>
+        </div>
+        <p class="nota" data-sem-investidor ${comInvestidor ? 'hidden' : ''}>Sem investidor, todo o aporte necessário fica com a Joy+ (100%).</p>
+      </fieldset>
+      <p class="nota" style="margin-top:16px">O cronograma do aporte (parcelas e datas) fica no bloco "Cronograma do aporte".</p>`,
     acoes: [{ rotulo: 'Salvar premissas', classe: 'primary', ao: async (el) => {
       const ler = (nome) => lerNumero(el.querySelector(`[name=${nome}]`).value);
       const corpo = Object.fromEntries(numericos.map((k) => [k, ler(k)]));
       if (Object.values(corpo).some((v) => Number.isNaN(v))) {
         throw new Error('Há valores inválidos.');
       }
+      const pct = el.querySelector('[name=com_investidor]').checked ? ler('pct_investidor') : 0;
+      if (Number.isNaN(pct) || pct < 0 || pct > 100) throw new Error('Participação do investidor: informe de 0 a 100%.');
+      Object.assign(corpo, { participacao_investidor: pct / 100, participacao_joy: 1 - pct / 100 });
       await api('/obra/parametros/premissas', { metodo: 'PUT', corpo });
       toast('Premissas salvas');
       recarregar();
     } }],
   });
+  const marcar = caixa.querySelector('[name=com_investidor]');
+  const pctInv = caixa.querySelector('[name=pct_investidor]');
+  marcar.onchange = () => {
+    caixa.querySelector('.divisao-campos').hidden = !marcar.checked;
+    caixa.querySelector('[data-sem-investidor]').hidden = marcar.checked;
+    if (marcar.checked && !(lerNumero(pctInv.value) > 0)) { pctInv.value = '85'; pctInv.dispatchEvent(new Event('input')); }
+  };
+  pctInv.oninput = () => {
+    const v = lerNumero(pctInv.value);
+    caixa.querySelector('[name=pct_joy]').value = Number.isNaN(v) ? '' : fmt.numero(100 - v).replace(/,00$/, '');
+  };
 }
 
 // ------------------------------------------------------------------ tela
-export async function render(el, { usuario, dataBase, recarregar, obra }) {
+export async function render(el, ctx) {
+  const { usuario, dataBase, recarregar, obra } = ctx;
   el.innerHTML = carregando(10);
   const d = await api(`/obra/resumo?data=${dataBase}`);
   el.innerHTML = `<div class="fade">
@@ -274,7 +310,8 @@ export async function render(el, { usuario, dataBase, recarregar, obra }) {
       <div class="eyebrow">Relatório de Aporte · ${esc(obra.nome)}</div><h2>Resumo de Custos e Despesas</h2>
       <p>Mês corrente <b>${fmt.mesLongo(d.datas.mes_atual)}</b> · mês de análise ${fmt.mesLongo(d.datas.mes_analise)} · última atualização ${fmt.dataHora(d.ultima_atualizacao)}</p>
     </div><div class="row-flex sem-impressao">
-      ${usuario.permissoes['premissas.editar'] ? '<button class="btn secondary sm" id="premissas">Premissas</button>' : ''}
+      ${usuario.permissoes['premissas.editar'] ? `<button class="btn secondary sm" id="viabilidade" title="Viabilidade (EVE) por rubrica de ${esc(obra.nome)}">Viabilidade</button>
+        <button class="btn secondary sm" id="premissas">Premissas</button>` : ''}
       <button class="btn secondary sm" onclick="window.print()">Imprimir</button></div></div>
     <div class="resumo-planilha">
       <div class="resumo-tabela">${tabela(d)}</div>
@@ -284,5 +321,6 @@ export async function render(el, { usuario, dataBase, recarregar, obra }) {
     </div>
   </div>`;
   el.querySelector('#premissas')?.addEventListener('click', () => editarPremissas(recarregar));
+  el.querySelector('#viabilidade')?.addEventListener('click', () => editarViabilidade(ctx));
   el.querySelector('#cronograma')?.addEventListener('click', () => editarCronograma(d, recarregar));
 }

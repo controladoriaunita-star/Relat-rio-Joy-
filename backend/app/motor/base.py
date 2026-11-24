@@ -84,6 +84,7 @@ class Base:
     empresa_spe: int | None = 73
     cliente_investidor: int | None = 8213
     historico_aporte_investidor: str | None = "APORTE Bapema Kalil Evans I Spe Ltda"
+    rubricas: list | None = None     # rubricas da obra (catalogo.Rubrica); None = as da planilha
 
     def __post_init__(self) -> None:
         self._indices: dict[tuple, dict] = {}

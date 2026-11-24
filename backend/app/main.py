@@ -20,7 +20,19 @@ from . import auth, config
 from .catalogo import ABAS_EM_BREVE, PAPEL_ADMIN
 from .db import Banco, ErroIntegridade, hoje
 from .fontes.definicoes import FONTES
-from .servicos import ErroNegocio, ObraNaoEncontrada, Servico, ServicoObra
+from .servicos import ErroConfirmacao, ErroNegocio, ObraNaoEncontrada, Servico, ServicoObra
+
+
+class RubricaObra(BaseModel):
+    nome: str
+    grupo: str
+    nome_anterior: str | None = None     # rubrica existente (renomeada ou não); vazio = nova
+
+
+class RubricasObra(BaseModel):
+    rubricas: list[RubricaObra]
+    viabilidade: dict[str, float] | None = None
+    forcar: bool = False
 
 
 class ItemProjecao(BaseModel):
@@ -103,6 +115,10 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
     @app.exception_handler(ErroNegocio)
     async def _erro_negocio(_: Request, erro: ErroNegocio):
         return JSONResponse({"detail": str(erro)}, status_code=422)
+
+    @app.exception_handler(ErroConfirmacao)
+    async def _erro_confirmacao(_: Request, erro: ErroConfirmacao):
+        return JSONResponse({"detail": str(erro), "confirmar": True}, status_code=409)
 
     @app.exception_handler(ObraNaoEncontrada)
     async def _obra_nao_encontrada(_: Request, erro: ObraNaoEncontrada):
@@ -210,7 +226,8 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
     def painel(hoje: date = Depends(data_base), so: ServicoObra = Depends(servico_obra),
                _: dict = Depends(exigir("painel.ver"))):
         resultado = so.calcular("painel", hoje)
-        return {**resultado, "linhas": [dataclasses.asdict(l) for l in resultado["linhas"]]}
+        return {**resultado, "linhas": [dataclasses.asdict(l) for l in resultado["linhas"]],
+                "participacao": so.premissas().participacao()}
 
     @obra.get("/projecao")
     def projecao(hoje: date = Depends(data_base), so: ServicoObra = Depends(servico_obra),
@@ -229,7 +246,8 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
 
     @obra.get("/parametros")
     def parametros(so: ServicoObra = Depends(servico_obra), _: dict = Depends(exigir("resumo.ver"))):
-        return {"premissas": so.premissas().como_dict(), "viabilidade": so.viabilidade()}
+        return {"premissas": so.premissas().como_dict(), "viabilidade": so.viabilidade(),
+                "grupos": so.grupos_rubricas()}
 
     @obra.put("/parametros/premissas")
     def salvar_premissas(dados: dict, so: ServicoObra = Depends(servico_obra),
@@ -245,6 +263,11 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
     def salvar_viabilidade(dados: dict[str, float], so: ServicoObra = Depends(servico_obra),
                            usuario: dict = Depends(exigir("premissas.editar"))):
         return so.salvar_viabilidade(dados, usuario)
+
+    @obra.put("/parametros/rubricas")
+    def salvar_rubricas(dados: RubricasObra, so: ServicoObra = Depends(servico_obra),
+                        usuario: dict = Depends(exigir("premissas.editar"))):
+        return so.salvar_rubricas([r.model_dump() for r in dados.rubricas], dados.viabilidade, usuario, dados.forcar)
 
     @obra.get("/fontes")
     def fontes(so: ServicoObra = Depends(servico_obra), _: dict = Depends(exigir("apis.ver"))):

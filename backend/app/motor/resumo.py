@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from ..catalogo import LINHAS_RESUMO, Premissas
+from ..catalogo import Premissas, linhas_resumo
 from ..excel_funcoes import DATA_ZERO, eomonth, texto_data, texto_igual, texto_mes
 from .base import Base, somar
 
@@ -145,7 +145,7 @@ def calcular_resumo(base: Base, hoje: date, viabilidade: dict[str, float],
     mes_analise = eomonth(hoje, -1)         # AD3 (= Painel D22)
 
     linhas = []
-    for spec in LINHAS_RESUMO:
+    for spec in linhas_resumo(base.rubricas):
         linha = {"linha_excel": spec.linha_excel, "rubrica": spec.rotulo, "grupo": spec.grupo}
         if spec.grupo in ("despesa", "custo"):
             linha["viabilidade"] = viabilidade.get(spec.rotulo, 0)
@@ -165,8 +165,8 @@ def calcular_resumo(base: Base, hoje: date, viabilidade: dict[str, float],
         linhas.append(linha)
 
     por_linha = {l["linha_excel"]: l for l in linhas}
-    soma = lambda campo, de, ate_l: sum(por_linha[r].get(campo) or 0
-                                        for r in range(de, ate_l + 1) if r in por_linha)
+    # Faixas de linhas do Excel; rubricas criadas na obra têm linha fracionária dentro da faixa.
+    soma = lambda campo, de, ate_l: sum(l.get(campo) or 0 for r, l in por_linha.items() if de <= r < ate_l + 1)
     por_linha[24]["viabilidade"] = soma("viabilidade", 7, 22)
     por_linha[43]["viabilidade"] = soma("viabilidade", 26, 39)
 
@@ -179,7 +179,7 @@ def calcular_resumo(base: Base, hoje: date, viabilidade: dict[str, float],
     saldo_anterior = saldo_fim_de_mes(base, eomonth(mes_analise))                 # Z5
     receita_mes = receitas_do_mes(base, mes)                                      # Z6 (Recebidas)
     custo_mes = sum((por_linha[r].get("pago_mes") or 0) + por_linha[r]["a_pagar"]
-                    + por_linha[r]["projetado_mes"] for r in range(7, 42))          # Z7
+                    + por_linha[r]["projetado_mes"] for r in por_linha if 7 <= r < 42)  # Z7
     aporte_total = aporte_necessario(saldo_anterior, receita_mes, premissas.caixa_minimo, custo_mes)  # Z9
 
     # Conta da SPE (Z13:Z18): fluxo do mês. As Recebidas já estão nas receitas; das
@@ -227,5 +227,6 @@ def calcular_resumo(base: Base, hoje: date, viabilidade: dict[str, float],
             "caixa_minimo": premissas.caixa_minimo_proximo, "aporte_total": aporte_proximo,
             "investidor": aporte_proximo * pi, "joy": aporte_proximo * pj},
         "cronograma_aporte": cronograma_do_aporte(premissas, mes, aporte_total, transferencias),
+        "participacao": premissas.participacao(),
         "ultima_atualizacao": base.ultima_atualizacao,
     }

@@ -42,7 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
-from ..catalogo import (CUSTOS, DESPESAS, IMPOSTO_RECEITA_ALIQUOTA, IMPOSTO_RECEITA_EVE,
+from ..catalogo import (RUBRICAS_PADRAO, IMPOSTO_RECEITA_ALIQUOTA, IMPOSTO_RECEITA_EVE,
                         INICIO_LINHA_DO_TEMPO, MESES_LINHA_DO_TEMPO, PREMISSAS_DESEMBOLSO,
                         RECEITAS_EVE, TIR_EVE, Premissas)
 from ..excel_funcoes import arredondar, eomonth, meses_entre, texto_igual, texto_mes
@@ -60,7 +60,7 @@ SEM_CONFERENCIA = {95, 97, 99, 101, 119, 122}
 
 @dataclass
 class Linha:
-    linha_excel: int
+    linha_excel: float             # fracionária nas rubricas criadas na obra (56.01, 76.01…)
     rotulo: str
     grupo: str
     H: float | None = None
@@ -164,7 +164,7 @@ class _Painel:
         self.total(41, "Receita Líquida", (36, 38))
 
     # ---------------------------------------------------------------- custos/despesas
-    def rubrica(self, r: int, nome: str, grupo: str) -> Linha:
+    def rubrica(self, r: float, nome: str, grupo: str) -> Linha:
         """Custo ou despesa, com sinal negativo. Realizado = Custos SPE e NN's pagos + Controle
         Saídas, pelo fim de mês; projetado = Projeção dos setores (P1: meses passados só realizado)."""
         b = self.base
@@ -190,15 +190,18 @@ class _Painel:
 
     def custos_e_despesas(self) -> None:
         # P6: margem = receita líquida − custos; o EVE dos custos é positivo (viabilidade).
-        for nome, _, r, _ in CUSTOS:
-            self.rubrica(r, nome, "custo")
-        custos = [r for _, _, r, _ in CUSTOS]
+        rubricas = self.base.rubricas if self.base.rubricas is not None else RUBRICAS_PADRAO
+        custos = [r.linha_painel for r in rubricas if r.grupo == "custo"]
+        for r in rubricas:
+            if r.grupo == "custo":
+                self.rubrica(r.linha_painel, r.nome, "custo")
         margem = self.total(59, "Margem Operacional (Bruta)", [41, *custos])
         margem.X = _n(self.linhas[41].X) - self.soma_linhas("X", custos)
 
-        for nome, _, r, _ in DESPESAS:
-            self.rubrica(r, nome, "despesa")
-        despesas = [r for _, _, r, _ in DESPESAS]
+        despesas = [r.linha_painel for r in rubricas if r.grupo == "despesa"]
+        for r in rubricas:
+            if r.grupo == "despesa":
+                self.rubrica(r.linha_painel, r.nome, "despesa")
         ebitda = self.total(79, "EBITDA", [59, *despesas])
         ebitda.X = _n(margem.X) - self.soma_linhas("X", despesas)
 
