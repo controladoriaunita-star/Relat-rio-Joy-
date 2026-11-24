@@ -14,7 +14,7 @@ def montar_base(tabelas: dict[str, list[list]], depara: dict[str, list[tuple]],
                 obra: Obra | None = None) -> tuple[Base, dict[str, ResultadoFonte]]:
     resultados = {
         f.codigo: normalizar(f.codigo, tabela_para_dicts(tabelas.get(f.codigo, [])),
-                             montar_depara(depara.get(f.codigo, [])))
+                             montar_depara(depara.get(f.codigo, [])), obra.empresa_spe if obra else None)
         for f in FONTES
     }
     identificacao = ({"empresa_spe": obra.empresa_spe, "cliente_investidor": obra.cliente_investidor,

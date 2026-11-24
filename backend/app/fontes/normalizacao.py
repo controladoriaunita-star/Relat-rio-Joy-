@@ -17,6 +17,7 @@ class ResultadoFonte:
     registros: list = field(default_factory=list)
     pendentes: list[dict] = field(default_factory=list)    # linhas sem classificação
     ignoradas: int = 0                                      # linhas fora da tabela (totais, notas)
+    outra_empresa: dict = field(default_factory=dict)       # código de empresa → linhas descartadas
     colunas_ausentes: list[str] = field(default_factory=list)
     linhas_lidas: int = 0
 
@@ -86,8 +87,18 @@ def _texto(valor) -> str | None:
     return None if valor is None else str(valor)
 
 
-def normalizar(codigo: str, linhas: list[dict], depara: dict[str, str]) -> ResultadoFonte:
+# Coluna de empresa das tabelas que só podem ter lançamentos da própria SPE. Custos NN's (pagos
+# pela holding, empresa 10) e Transferências (entre empresas, por definição) ficam de fora.
+COLUNA_EMPRESA_DA_SPE = {"custos_spe": "Empresa", "saidas": "Empresa_es", "entradas": "Empresa_es",
+                         "recebidas": "Empresa", "saldos": "Empresa"}
+
+
+def normalizar(codigo: str, linhas: list[dict], depara: dict[str, str],
+               empresa: int | None = None) -> ResultadoFonte:
+    """`empresa` = código UAU da SPE da obra: linhas com outro código de empresa (ex.: dados de
+    outra obra que ficaram na consulta) são descartadas e contadas em `outra_empresa`."""
     fonte = FONTES_POR_CODIGO[codigo]
+    coluna_empresa = COLUNA_EMPRESA_DA_SPE.get(codigo) if empresa is not None else None
     resultado = ResultadoFonte(linhas_lidas=len(linhas))
     if linhas:
         resultado.colunas_ausentes = [c for c in fonte.colunas if c not in linhas[0]]
@@ -98,6 +109,11 @@ def normalizar(codigo: str, linhas: list[dict], depara: dict[str, str]) -> Resul
         if fora_da_tabela(fonte, linha):
             resultado.ignoradas += 1
             continue
+        if coluna_empresa and not _vazio(linha.get(coluna_empresa)):
+            codigo_empresa = _inteiro(linha[coluna_empresa])
+            if codigo_empresa != empresa:
+                resultado.outra_empresa[codigo_empresa] = resultado.outra_empresa.get(codigo_empresa, 0) + 1
+                continue
         classificacao = concat = None
         if fonte.chave:
             concat = chave_concat(fonte, linha)

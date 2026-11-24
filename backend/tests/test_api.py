@@ -592,3 +592,19 @@ def test_divisao_do_aporte_por_obra(ambiente):
     assert r.status_code == 200 and math.isclose(r.json()["participacao_joy"], 0.3)
     assert adm.get(f"/api/obras/evans/resumo?data={HOJE}").json()["participacao"]["investidor"] == 0.85
     assert adm.post("/api/obras", json={"codigo": "x-pct", "nome": "X", "participacao_investidor": 1.5}).status_code == 422
+
+
+def test_linhas_de_outra_empresa_sao_descartadas():
+    """Recebidas/Custos SPE/Saídas/Entradas/Saldos só aceitam a empresa da SPE da obra
+    (ex.: consulta do Berrini trazendo recebimentos da Evans, empresa 73)."""
+    from backend.app.fontes.normalizacao import normalizar
+    cab = ["Empresa", "CódigoCliente", "Data_Recebimento", "Valor_Líquido"]
+    linhas = [dict(zip(cab, v)) for v in ([67, 1, "2026-11-10", 100.0], [73, 2, "2026-11-10", 552500.0],
+                                          [73, 2, "2026-11-12", 10500.0])]
+    r = normalizar("recebidas", linhas, {}, empresa=67)
+    assert [x.valor for x in r.registros] == [100.0] and r.outra_empresa == {73: 2}
+    assert len(normalizar("recebidas", linhas, {}).registros) == 3       # sem obra: como a planilha
+    # Custos NN's vêm da holding (empresa 10): não filtra
+    cab_nn = ["Empresa", "Obra", "NProcesso", "DocFiscal", "DataPagamento", "TotalLiquido", "Status", "Classificação"]
+    nn = [dict(zip(cab_nn, [10, "X", 1, "NF1", "2026-11-10", 50.0, "Pago", "Projetos"]))]
+    assert len(normalizar("custos_nn", nn, {}, empresa=67).registros) == 1

@@ -27,6 +27,9 @@ function cartaoFonte(f, podeClassificar) {
       <dt>Última carga válida</dt><dt>Origem · duração</dt>
       <dd>${ok ? fmt.dataHora(ok.iniciado_em) : '—'}</dd><dd>${ok ? `${ok.origem === 'graph' ? 'SharePoint' : 'Excel'} · ${ok.duracao_s}s` : '—'}</dd>
     </dl>
+    ${Object.keys(f.outra_empresa || {}).length ? `<div class="alert a-warning" style="margin-top:10px"><b>Linhas de outra empresa descartadas</b>
+      <div>${Object.entries(f.outra_empresa).map(([emp, n]) => `${n} linha(s) da empresa ${esc(emp)}`).join(' · ')}.
+      Só entram lançamentos da SPE desta obra; confira a consulta da aba no Excel.</div></div>` : ''}
     ${f.ultima?.status === 'erro' ? `<div class="erro"><b>${fmt.dataHora(f.ultima.iniciado_em)}</b> · ${esc(f.ultima.mensagem)}</div>` : ''}
     ${f.pendentes && podeClassificar ? `<button class="btn secondary sm" data-pendentes="${f.codigo}">Classificar ${f.pendentes} lançamento(s)</button>` : ''}
   </div>`;

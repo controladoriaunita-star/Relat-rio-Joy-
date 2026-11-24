@@ -600,7 +600,8 @@ class ServicoObra:
             try:
                 valores = (tabelas_excel[codigo] if origem == "excel"
                            else self.graph.ler_aba(self.obra.graph_item_id, self.obra.aba(fonte)))
-                avaliacao = normalizar(codigo, tabela_para_dicts(valores), depara.get(codigo, {}))
+                avaliacao = normalizar(codigo, tabela_para_dicts(valores), depara.get(codigo, {}),
+                                       self.obra.empresa_spe)
                 if not valores:
                     status, mensagem = "erro", "A aba voltou vazia."
                 elif avaliacao.colunas_ausentes:
@@ -640,6 +641,7 @@ class ServicoObra:
                 "valor_total": round(self._valor_da_carga(fonte.codigo, resultado.registros), 2),
                 "pendentes": len(resultado.pendentes),
                 "ignoradas": resultado.ignoradas,
+                "outra_empresa": {str(k): v for k, v in resultado.outra_empresa.items()},
                 "classificavel": bool(fonte.chave),
                 "historico": cargas,
             })
