@@ -247,3 +247,12 @@ def test_painel_exposicao_maxima():
     acumulado = l[95].tl
     assert l[101].T == min(acumulado)
     assert l[101].H == _no_mes(p, l[95], SET) and math.isclose(l[101].H + l[101].P, l[101].T)
+
+
+def test_comparacao_de_texto_ignora_espacos_sobrando():
+    """Classificação com espaço no fim (ex.: DePara do Berrini) entra na rubrica normalmente."""
+    from backend.app.excel_funcoes import chave_texto, texto_igual
+    assert texto_igual("MARKETING (Lançamento) ", "MARKETING (Lançamento)")
+    assert texto_igual("  marketing  (lançamento)", "MARKETING (Lançamento)")
+    assert not texto_igual("MARKETING (Lançamento)", "MARKETING (Montagem)")
+    assert chave_texto(None) is None and not texto_igual(None, "x")

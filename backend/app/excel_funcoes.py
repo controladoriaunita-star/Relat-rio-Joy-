@@ -61,14 +61,16 @@ def como_numero(valor) -> float:
 
 
 def chave_texto(valor) -> str | None:
-    """Chave para comparação de texto no estilo Excel; None quando não é texto comparável."""
+    """Chave para comparação de texto: sem diferença de maiúsculas e ignorando espaços sobrando
+    (no começo, no fim ou repetidos no meio). Diferente do Excel, "MARKETING (Lançamento) " com
+    espaço no fim é a mesma rubrica que "MARKETING (Lançamento)". None quando não há texto."""
     if valor is None:
         return None
-    return str(valor).casefold()
+    return " ".join(str(valor).split()).casefold()
 
 
 def texto_igual(a, b) -> bool:
-    return a is not None and b is not None and str(a).casefold() == str(b).casefold()
+    return a is not None and b is not None and chave_texto(a) == chave_texto(b)
 
 
 def texto_concat(valor) -> str:
