@@ -66,6 +66,32 @@ function tabela(d) {
 }
 
 // ------------------------------------------------------------------ Relatório de Aporte (colunas Y:Z)
+// Explicações ficam num "i" clicável que abre um card de texto (não ocupam espaço na tela nem no PDF).
+const info = (texto) => `<button type="button" class="info-i sem-impressao" data-info="${esc(texto)}"
+  aria-label="Explicação" title="Explicação">i</button>`;
+let cardInfo = null;
+function fecharInfo() { cardInfo?.remove(); cardInfo = null; }
+function abrirInfo(botao) {
+  const mesmo = cardInfo?.dono === botao;
+  fecharInfo();
+  if (mesmo) return;                                  // segundo clique no mesmo "i" fecha
+  cardInfo = document.createElement('div');
+  cardInfo.className = 'card card-info';
+  cardInfo.setAttribute('role', 'dialog');
+  cardInfo.dono = botao;
+  cardInfo.innerHTML = `<p>${esc(botao.dataset.info)}</p>`;
+  document.body.append(cardInfo);
+  const r = botao.getBoundingClientRect();
+  const largura = cardInfo.offsetWidth;
+  cardInfo.style.top = `${window.scrollY + r.bottom + 6}px`;
+  cardInfo.style.left = `${Math.max(8, Math.min(window.scrollX + r.left - largura / 2, window.scrollX + innerWidth - largura - 8))}px`;
+}
+document.addEventListener('click', (e) => {
+  if (cardInfo && !cardInfo.contains(e.target) && !e.target.closest('[data-info]')) fecharInfo();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharInfo(); });
+window.addEventListener('hashchange', fecharInfo);
+
 const par = (rotulo, valor, classe = '') =>
   `<div class="par ${classe}"><span>${rotulo}</span><b>${valor}</b></div>`;
 const moeda = (v) => fmt.moeda(v);
@@ -87,22 +113,22 @@ function divisao(a, p) {
 function blocoAporteMes(d) {
   const a = d.aporte_mes;
   return `<section class="card bloco-aporte destaque-aporte">
-    <p class="sub">Aporte necessário no mês · ${fmt.mesLongo(d.datas.mes_atual)}</p>
-    <p class="numero-heroi">${valorAporte(a.aporte_total)}</p>
-    ${divisao(a, d.participacao)}
+    <header class="bloco-topo"><p class="sub">Aporte necessário no mês · ${fmt.mesLongo(d.datas.mes_atual)}</p>
+      ${info(`Aporte = custo do mês + caixa mínimo − saldo − receitas do mês. Receitas = tudo o que a aba Recebidas registra no mês (hoje, os aportes do investidor), então o valor acima é o que ainda falta aportar. Cobre as contas do mês e mantém ${moeda(a.caixa_minimo)} em caixa.`)}</header>
+    <div class="heroi-linha"><p class="numero-heroi">${valorAporte(a.aporte_total)}</p>
+    ${divisao(a, d.participacao)}</div>
     <div class="extrato">
       ${par(esc(d.titulos.saldo_anterior), moeda(a.saldo_anterior))}
       ${par('Receitas do mês (Recebidas)', moeda(a.receita_mes))}
       ${par(esc(d.titulos.custo_mes), moeda(a.custo_mes))}
       ${par('Caixa mínimo', moeda(a.caixa_minimo))}
     </div>
-    <p class="nota">Aporte = custo do mês + caixa mínimo − saldo − receitas do mês. Receitas = tudo o que a aba Recebidas registra no mês (hoje, os aportes do investidor), então o valor acima é o que ainda falta aportar. Cobre as contas do mês e mantém ${moeda(a.caixa_minimo)} em caixa.</p>
   </section>`;
 }
 
 function blocoConta(d) {
   const c = d.conta;
-  return `<section class="card bloco-aporte">
+  return `<section class="card bloco-aporte bloco-conta">
     <p class="sub">Conta da SPE · ${fmt.mesLongo(d.datas.mes_atual)}</p>
     <div class="extrato">
       ${par('Saldo inicial (fim do mês anterior)', moeda(c.saldo_inicial))}
@@ -119,7 +145,8 @@ function blocoConta(d) {
 function blocoProximo(d) {
   const p = d.aporte_proximo;
   return `<section class="card bloco-aporte">
-    <p class="sub">Aporte do próximo mês · ${fmt.mesLongo(d.datas.proximo_mes)}</p>
+    <header class="bloco-topo"><p class="sub">Aporte do próximo mês · ${fmt.mesLongo(d.datas.proximo_mes)}</p>
+      ${info('Custo projetado = projeção dos setores + contas a pagar com vencimento no próximo mês.')}</header>
     <p class="numero-heroi menor">${valorAporte(p.aporte_total)}</p>
     ${divisao(p, d.participacao)}
     <div class="extrato">
@@ -128,7 +155,6 @@ function blocoProximo(d) {
       ${par(`${esc(d.titulos.custo_proximo)}${p.custo_automatico ? ' <span class="badge b-primary">automático</span>' : ''}`, moeda(p.custo_projetado))}
       ${par('Caixa mínimo', moeda(p.caixa_minimo))}
     </div>
-    <p class="nota">Custo projetado = projeção dos setores + contas a pagar com vencimento no próximo mês.</p>
   </section>`;
 }
 
@@ -148,10 +174,11 @@ function blocoCronograma(d, podeEditar) {
     </div>`;
   }).join('');
   return `<section class="card bloco-aporte">
-    <header class="bloco-topo"><p class="sub">Cronograma do aporte · ${fmt.mesLongo(d.datas.mes_atual)}</p>
-      ${podeEditar && !semAporte ? '<button class="btn secondary sm sem-impressao" id="cronograma">Programar</button>' : ''}</header>
+    <header class="bloco-topo"><p class="sub">Cronograma do aporte · ${fmt.mesLongo(d.datas.mes_atual)}
+        ${!semAporte && !c.programado ? '<span class="badge b-neutral">não programado</span>' : ''}</p>
+      <span class="row-flex" style="gap:6px">${!semAporte && !c.programado ? info('Ainda não programado: parcela única no dia 1.') : ''}
+      ${podeEditar && !semAporte ? '<button class="btn secondary sm sem-impressao" id="cronograma">Programar</button>' : ''}</span></header>
     ${semAporte ? '<p class="muted" style="margin:0">Sem aporte necessário neste mês.</p>' : `
-      ${c.programado ? '' : '<p class="nota">Ainda não programado: parcela única no dia 1.</p>'}
       <div class="parcelas">${parcelas}</div>
       <div class="extrato">
         ${par('Aporte necessário', moeda(c.total), 'forte destaque')}
@@ -320,13 +347,22 @@ export async function render(el, ctx) {
         <button class="btn secondary sm" id="premissas">Premissas</button>` : ''}
       <button class="btn secondary sm" onclick="window.print()">Imprimir</button></div></div>
     <div class="resumo-planilha">
-      <div class="resumo-tabela">${tabela(d)}</div>
-      <aside class="relatorio-aporte" aria-label="Relatório de Aporte">
+      <section class="relatorio-aporte" aria-label="Relatório de Aporte">
         ${blocoAporteMes(d)}${blocoCronograma(d, usuario.permissoes['premissas.editar'])}${blocoConta(d)}
-      </aside>
+      </section>
+      <div class="resumo-tabela">${tabela(d)}</div>
     </div>
   </div>`;
   el.querySelector('#premissas')?.addEventListener('click', () => editarPremissas(recarregar));
+  el.querySelector('.relatorio-aporte').addEventListener('click', (e) => {
+    const botao = e.target.closest('[data-info]');
+    if (botao) abrirInfo(botao);
+  });
+  // Cabeçalho da tabela congelado logo abaixo da barra do app (que também fica fixa no topo).
+  const topoFixo = () => document.documentElement.style.setProperty('--topo-fixo',
+    `${document.querySelector('header.app')?.offsetHeight || 0}px`);
+  topoFixo();
+  window.addEventListener('resize', topoFixo);
   el.querySelector('.tabela-resumo').addEventListener('click', (e) => {
     const botao = e.target.closest('.segmentador');
     if (!botao) return;
