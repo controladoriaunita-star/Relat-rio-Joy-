@@ -549,3 +549,12 @@ main { padding: 24px var(--gutter) 96px; }
   .cartao-obra-numeros { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   header.app .contexto-titulo, header.app .contexto-obra { font-size: 14px; }
 }
+
+/* Projeção: criar/editar setores e linhas na própria grade */
+.btn.xs { height: 24px; padding: 0 8px; font-size: 12px; border-radius: 6px; }
+.grade-projecao .celula-setor, .grade-projecao .celula-linha { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.grade-projecao .acoes-linha { display: inline-flex; gap: 2px; flex-shrink: 0; }
+.grade-projecao .editar-linha { opacity: 0; flex-shrink: 0; }
+.grade-projecao tr:hover .editar-linha, .grade-projecao .editar-linha:focus-visible { opacity: 1; }
+@media (hover: none) { .grade-projecao .editar-linha { opacity: 1; } }
+@media print { .grade-projecao .acoes-linha, .grade-projecao .editar-linha { display: none; } }

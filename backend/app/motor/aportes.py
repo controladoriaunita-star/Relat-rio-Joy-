@@ -1,9 +1,10 @@
 """Aba Aportes: aportes feitos na SPE até a data-base.
 
   * Investidor: todos os lançamentos da aba Recebidas.
-  * Joy+: Transferências Bancárias de outra empresa para a SPE (Empresa_tb ≠ 73 e
-    EmpresaCred_tb = 73). Empresa_tb 10 = Joy+, 1 = Unità; qualquer outro código vira
-    apontamento para conferência (o valor entra no total da Joy+ como "não identificada").
+  * Joy+: Transferências Bancárias de outra empresa para a SPE da obra (Empresa_tb ≠ código
+    UAU da obra e EmpresaCred_tb = código UAU da obra; na Evans, 73). Empresa_tb 10 = Joy+,
+    1 = Unità; qualquer outro código vira apontamento para conferência (o valor entra no total
+    da Joy+ como "não identificada").
 """
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ def aportes_ate(base: Base, hoje: date) -> dict:
     total_joy = sum(a["valor"] for a in joy)
     return {
         "ate": hoje,
+        "empresa_spe": base.empresa_spe,
         "totais": {"investidor": total_investidor, "joy": total_joy, "geral": total_investidor + total_joy,
                    "joy_por_empresa": por_empresa,
                    "nao_identificada": sum(a["valor"] for a in apontamentos)},

@@ -49,6 +49,13 @@ export class ErroApi extends Error {
 let obraAtual = null;
 export const definirObra = (codigo) => { obraAtual = codigo; };
 export const obraAtiva = () => obraAtual;
+const obraPorTela = {};
+/** true quando a tela é aberta numa obra diferente da última vez (para zerar filtros dela). */
+export function trocouObra(tela) {
+  const mudou = obraPorTela[tela] !== obraAtual;
+  obraPorTela[tela] = obraAtual;
+  return mudou;
+}
 
 export async function api(caminho, { metodo = 'GET', corpo } = {}) {
   if (caminho.startsWith('/obra/')) caminho = `/api/obras/${encodeURIComponent(obraAtual)}/${caminho.slice(6)}`;

@@ -1,6 +1,6 @@
 // Aba Projeção › Projetado × Incorrido: consulta do mês por setor. Mostra o que cada linha
 // projetou e os lançamentos da base de custos (Custos SPE e NN's) nas rubricas do setor.
-import { api, carregando, esc, fmt } from '../util.js';
+import { api, carregando, esc, fmt, trocouObra } from '../util.js';
 
 const estado = { mes: null, setor: null, versao: 0 };   // versao: descarta resposta de filtro antigo
 
@@ -53,6 +53,7 @@ function caixas(d) {
 /** `topo` é o cabeçalho da aba (com o alternador Grade | Projetado × Incorrido);
  * `aoDesenhar` religa o alternador sempre que o cabeçalho é redesenhado. */
 export async function render(el, opcoes) {
+  if (trocouObra('comparativo')) Object.assign(estado, { mes: null, setor: null });
   const { usuario, dataBase, setores, topo, aoDesenhar } = opcoes;
   const versao = ++estado.versao;
   estado.mes ??= dataBase.slice(0, 7);

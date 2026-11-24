@@ -1,9 +1,10 @@
 // Aba Projeção: cada setor projeta suas linhas mês a mês. O total por rubrica
 // alimenta as colunas "Projetado" do Resumo e do Painel.
-import { api, carregando, erroToast, esc, fmt, focarMesCorrente, lerNumero, modal, toast } from '../util.js';
+import { api, carregando, erroToast, esc, fmt, focarMesCorrente, lerNumero, modal, toast, trocouObra } from '../util.js';
 import * as comparativo from './comparativo.js';
 
-const estado = { dados: null, alteracoes: new Map(), setor: null, ano: null, soComValor: false, visao: 'grade' };
+const estado = { dados: null, alteracoes: new Map(), setor: null, ano: null, soComValor: false, visao: 'grade',
+                 gerenciar: false };   // gerenciar: pode criar/editar setores e linhas da obra
 const chave = (linha, mes) => `${linha}|${mes}`;
 
 function valorAtual(linha, mes) {
@@ -34,13 +35,16 @@ function grade() {
   for (const setor of setoresVisiveis()) {
     const linhas = setor.linhas.filter((l) => !estado.soComValor || totalLinha(l, todos) !== 0);
     const somaMes = (m) => setor.linhas.reduce((a, l) => a + valorAtual(l, m), 0);
-    corpo += `<tr class="setor"><td class="first">${esc(setor.nome)}
-        ${setor.editavel ? '' : '<span class="cadeado">· somente leitura</span>'}</td>
+    corpo += `<tr class="setor"><td class="first"><div class="celula-setor"><span>${esc(setor.nome)}
+        ${setor.editavel ? '' : '<span class="cadeado">· somente leitura</span>'}</span>
+        ${estado.gerenciar ? `<span class="acoes-linha"><button class="btn ghost xs" data-nova-linha="${setor.id}" title="Nova linha em ${esc(setor.nome)}">+ Linha</button>
+          <button class="btn ghost xs" data-editar-setor="${setor.id}" title="Editar setor">Editar</button></span>` : ''}</div></td>
       ${meses.map((m) => `<td class="${m === estado.dados.mes_atual ? 'cur' : ''}" data-setor-mes="${setor.id}|${m}">${fmt.numero(somaMes(m))}</td>`).join('')}
       <td class="tot" data-setor-ano="${setor.id}">${fmt.numero(meses.reduce((a, m) => a + somaMes(m), 0))}</td>
       <td class="tot" data-setor-total="${setor.id}">${fmt.numero(todos.reduce((a, m) => a + somaMes(m), 0))}</td></tr>`;
     for (const linha of linhas) {
-      corpo += `<tr data-linha="${linha.id}"><td class="first">${esc(linha.nome)}<span class="rubrica-sub">${esc(linha.rubrica)}</span></td>
+      corpo += `<tr data-linha="${linha.id}"><td class="first"><div class="celula-linha"><span>${esc(linha.nome)}<span class="rubrica-sub">${esc(linha.rubrica)}</span></span>
+        ${estado.gerenciar ? `<button class="btn ghost xs editar-linha" data-editar-linha="${linha.id}" data-setor-linha="${setor.id}" title="Editar linha" aria-label="Editar ${esc(linha.nome)}">✎</button>` : ''}</div></td>
         ${meses.map((m) => {
           const k = chave(linha.id, m);
           const trava = bloqueado(setor, m);
@@ -52,7 +56,10 @@ function grade() {
         <td class="tot" data-linha-ano="${linha.id}">${fmt.numero(totalLinha(linha, meses))}</td>
         <td class="tot" data-linha-total="${linha.id}">${fmt.numero(totalLinha(linha, todos))}</td></tr>`;
     }
-    if (!linhas.length) corpo += `<tr><td class="first muted" colspan="${meses.length + 3}">Nenhuma linha com valor.</td></tr>`;
+    if (!linhas.length) {
+      corpo += `<tr><td class="first muted" colspan="${meses.length + 3}">${setor.linhas.length ? 'Nenhuma linha com valor.'
+        : estado.gerenciar ? 'Sem linhas: use "+ Linha" para criar a primeira.' : 'Sem linhas de projeção.'}</td></tr>`;
+    }
   }
   return `<div class="sheet grade-projecao" style="max-height:62vh"><table>
     <thead><tr><th class="first">Linha de projeção</th>${cab}<th class="tot">Total ${estado.ano}</th><th class="tot">Total geral</th></tr></thead>
@@ -149,42 +156,52 @@ function colar(evento, el) {
   toast(`${aplicados} célula(s) coladas`, { tipo: 'info' });
 }
 
-// ------------------------------------------------------------------ administração de linhas
-function gerenciarLinhas(recarregar) {
+// ------------------------------------------------------------------ setores e linhas (por obra)
+function formularioLinha({ setorId, linha = null, recarregar }) {
   const { setores, rubricas } = estado.dados;
-  const opcoesSetor = setores.map((s) => `<option value="${s.id}">${esc(s.nome)}</option>`).join('');
-  const opcoesRubrica = rubricas.map((r) => `<option>${esc(r.rubrica)}</option>`).join('');
-  const lista = setores.map((s) => `<p class="sub" style="margin-top:16px">${esc(s.nome)} · perfil "${esc(s.codigo)}"</p>
-    ${s.linhas.map((l) => `<div class="par"><span>${esc(l.nome)} <span class="muted">· ${esc(l.rubrica)}</span></span>
-      <button class="btn ghost sm" data-desativar="${l.id}" data-setor="${s.id}">Desativar</button></div>`).join('')}`).join('');
-  const janela = modal({
-    titulo: 'Setores e linhas de projeção',
-    conteudo: `<p>Um setor novo cria um perfil de acesso com o mesmo código. Linhas desativadas deixam de ser somadas.</p>
-      <p class="sub" style="margin-top:16px">Nova linha</p>
-      <div class="formulario"><div class="field"><label>Setor</label><select name="setor">${opcoesSetor}</select></div>
-        <div class="field"><label>Nome da linha</label><input name="nome" placeholder="Ex.: ARQUITETURA | RSA" /></div>
-        <div class="field"><label>Rubrica</label><select name="rubrica">${opcoesRubrica}</select></div></div>
-      <p class="sub" style="margin-top:16px">Novo setor</p>
-      <div class="formulario"><div class="field"><label>Código (perfil)</label><input name="codigo" placeholder="ex.: jur" /></div>
-        <div class="field"><label>Nome</label><input name="nome_setor" placeholder="Ex.: Jurídico" /></div></div>
-      ${lista}`,
-    acoes: [{ rotulo: 'Salvar', classe: 'primary', ao: async (el) => {
+  const setor = setores.find((x) => x.id === setorId);
+  const temValor = linha && Object.values(linha.valores || {}).some((v) => v);
+  modal({
+    titulo: linha ? `Linha ${linha.nome}` : `Nova linha · ${setor.nome}`,
+    conteudo: `<p>Cada linha soma na rubrica escolhida (coluna "Projetado" do Resumo e do Painel desta obra).</p>
+      <div class="grid form-obra" style="margin-top:14px">
+        <div class="field"><label>Nome da linha</label><input name="nome" value="${esc(linha?.nome || '')}" placeholder="Ex.: ARQUITETURA | RSA" /></div>
+        <div class="field"><label>Rubrica</label><select name="rubrica">${rubricas.map((r) => `<option ${r.rubrica === linha?.rubrica ? 'selected' : ''}>${esc(r.rubrica)}</option>`).join('')}</select></div>
+        <div class="field"><label>Setor</label><select name="setor">${setores.map((x) => `<option value="${x.id}" ${x.id === setorId ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select></div>
+        ${linha ? `<label class="row-flex muted" style="gap:6px"><input type="checkbox" name="desativar" /> Desativar esta linha</label>` : ''}
+      </div>
+      ${temValor ? '<div class="alert a-warning" style="margin-top:12px"><b>Esta linha tem valores projetados</b><div>Ao desativar, eles deixam de somar no relatório.</div></div>' : ''}`,
+    acoes: [{ rotulo: linha ? 'Salvar linha' : 'Criar linha', classe: 'primary', ao: async (el) => {
       const v = (n) => el.querySelector(`[name=${n}]`).value.trim();
-      if (v('codigo') || v('nome_setor')) await api('/obra/setores', { metodo: 'POST', corpo: { codigo: v('codigo'), nome: v('nome_setor') } });
-      if (v('nome')) await api('/obra/linhas', { metodo: 'POST', corpo: { setor_id: Number(v('setor')), nome: v('nome'), rubrica: v('rubrica') } });
-      toast('Cadastro atualizado');
+      if (!v('nome')) throw new Error('Informe o nome da linha.');
+      await api('/obra/linhas', { metodo: 'POST', corpo: {
+        id: linha?.id, setor_id: Number(v('setor')), nome: v('nome'), rubrica: v('rubrica'),
+        ordem: linha?.ordem ?? 99, ativo: el.querySelector('[name=desativar]')?.checked ? 0 : 1 } });
+      toast(linha ? 'Linha atualizada' : 'Linha criada');
       recarregar();
     } }],
   });
-  janela.querySelectorAll('[data-desativar]').forEach((b) => (b.onclick = async () => {
-    const linha = linhaPorId(Number(b.dataset.desativar));
-    try {
-      await api('/obra/linhas', { metodo: 'POST', corpo: { ...linha, setor_id: Number(b.dataset.setor), ativo: 0 } });
-      b.closest('.par').remove();
-      toast('Linha desativada');
+}
+
+function formularioSetor({ setor = null, recarregar }) {
+  modal({
+    titulo: setor ? `Setor ${setor.nome}` : 'Novo setor',
+    conteudo: `<p>O código do setor é também o perfil de acesso: usuários com esse perfil editam as linhas do setor (em qualquer obra).</p>
+      <div class="grid form-obra" style="margin-top:14px">
+        <div class="field"><label>Nome</label><input name="nome" value="${esc(setor?.nome || '')}" placeholder="Ex.: Jurídico" /></div>
+        <div class="field"><label>Código (perfil)</label><input name="codigo" value="${esc(setor?.codigo || '')}" placeholder="ex.: jur" ${setor ? 'disabled' : ''} /></div>
+        ${setor ? '<label class="row-flex muted" style="gap:6px"><input type="checkbox" name="desativar" /> Desativar este setor (some da grade e do relatório)</label>' : ''}
+      </div>`,
+    acoes: [{ rotulo: setor ? 'Salvar setor' : 'Criar setor', classe: 'primary', ao: async (el) => {
+      const v = (n) => el.querySelector(`[name=${n}]`).value.trim();
+      if (!v('nome') || (!setor && !v('codigo'))) throw new Error('Informe nome e código do setor.');
+      await api('/obra/setores', { metodo: 'POST', corpo: {
+        id: setor?.id, codigo: setor?.codigo || v('codigo'), nome: v('nome'), ordem: setor?.ordem ?? 99,
+        ativo: el.querySelector('[name=desativar]')?.checked ? 0 : 1 } });
+      toast(setor ? 'Setor atualizado' : 'Setor criado', { texto: setor ? '' : 'Agora crie as linhas do setor com "+ Linha".' });
       recarregar();
-    } catch (erro) { erroToast(erro); }
-  }));
+    } }],
+  });
 }
 
 // ------------------------------------------------------------------ tela
@@ -203,18 +220,21 @@ function topo(d, usuario) {
     : `${editaveis.length === d.setores.length ? 'Você pode editar todos os setores.' : editaveis.length ? `Você edita: ${esc(editaveis.join(', '))}.` : 'Somente leitura.'}
         Os totais por rubrica entram no "Projetado" do Resumo e do Painel.`;
   return `<div class="cabecalho"><div>
-      <div class="eyebrow">Projeção de custos</div><h2>${estado.visao === 'comparativo' ? 'Projetado × Incorrido' : 'Projeção por setor'}</h2>
+      <div class="eyebrow">Projeção de custos · ${esc(estado.obra || '')}</div><h2>${estado.visao === 'comparativo' ? 'Projetado × Incorrido' : 'Projeção por setor'}</h2>
       <p>${texto}</p>
     </div><div class="row-flex sem-impressao">
       <div class="segmentado" role="tablist">
         <button data-visao="grade" class="${estado.visao === 'grade' ? 'on' : ''}">Grade</button>
         <button data-visao="comparativo" class="${estado.visao === 'comparativo' ? 'on' : ''}">Projetado × Incorrido</button></div>
-      ${usuario.permissoes['setores.gerenciar'] && estado.visao === 'grade' ? '<button class="btn secondary sm" id="gerenciar">Setores e linhas</button>' : ''}
+      ${estado.gerenciar && estado.visao === 'grade' ? '<button class="btn secondary sm" id="novo-setor">+ Setor</button>' : ''}
     </div></div>`;
 }
 
 export async function render(el, ctx) {
-  const { usuario, dataBase, recarregar } = ctx;
+  const { usuario, dataBase, recarregar, obra } = ctx;
+  if (trocouObra('projecao')) Object.assign(estado, { setor: null, ano: null, soComValor: false });
+  estado.obra = obra?.nome;
+  estado.gerenciar = Boolean(usuario.permissoes['setores.gerenciar']);
   el.innerHTML = carregando(10);
   estado.dados = await api(`/obra/projecao?data=${dataBase}`);
   estado.alteracoes.clear();
@@ -230,6 +250,16 @@ export async function render(el, ctx) {
   if (estado.visao === 'comparativo') {
     return comparativo.render(el, { usuario, dataBase, setores: d.setores, topo: topo(d, usuario),
                                     aoDesenhar: ligarAlternador });
+  }
+  if (!d.setores.length) {
+    el.innerHTML = `<div class="fade">${topo(d, usuario)}<div class="card empty"><h3>Nenhum setor nesta obra</h3>
+      <p>${estado.gerenciar ? 'Crie os setores e, em cada um, as linhas de projeção ligadas às rubricas do relatório.'
+        : 'A Controladoria ainda não criou os setores desta obra.'}</p>
+      ${estado.gerenciar ? '<button class="btn primary sm" id="primeiro-setor">+ Criar o primeiro setor</button>' : ''}</div></div>`;
+    el.querySelector('#primeiro-setor')?.addEventListener('click', () => formularioSetor({ recarregar }));
+    el.querySelector('#novo-setor')?.addEventListener('click', () => formularioSetor({ recarregar }));
+    ligarAlternador();
+    return;
   }
   estado.ano ??= d.mes_atual.slice(0, 4);
   if (estado.setor === null) estado.setor = d.setores.some((s) => s.codigo === usuario.perfil) ? usuario.perfil : '';
@@ -270,10 +300,17 @@ export async function render(el, ctx) {
   el.querySelectorAll('#setores [data-setor]').forEach((b) => (b.onclick = () => { estado.setor = b.dataset.setor; desenhar(); }));
   el.querySelectorAll('#anos [data-ano]').forEach((b) => (b.onclick = () => { estado.ano = b.dataset.ano; desenhar(); }));
   el.querySelector('#so-valor').onchange = (e) => { estado.soComValor = e.target.checked; desenhar(); };
-  el.querySelector('#gerenciar')?.addEventListener('click', () => gerenciarLinhas(recarregar));
+  el.querySelector('#novo-setor')?.addEventListener('click', () => formularioSetor({ recarregar }));
   ligarAlternador();
 
   const gradeEl = el.querySelector('#grade');
+  gradeEl.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-nova-linha],[data-editar-linha],[data-editar-setor]');
+    if (!b || !sair()) return;                       // alterações não salvas: confirma antes de recarregar
+    if (b.dataset.novaLinha) formularioLinha({ setorId: Number(b.dataset.novaLinha), recarregar });
+    if (b.dataset.editarLinha) formularioLinha({ setorId: Number(b.dataset.setorLinha), linha: linhaPorId(Number(b.dataset.editarLinha)), recarregar });
+    if (b.dataset.editarSetor) formularioSetor({ setor: d.setores.find((x) => x.id === Number(b.dataset.editarSetor)), recarregar });
+  });
   gradeEl.addEventListener('focusin', (e) => { if (e.target.matches('input:not([readonly])')) e.target.select(); });
   gradeEl.addEventListener('change', (e) => { if (e.target.matches('input')) registrar(e.target, el); });
   gradeEl.addEventListener('paste', (e) => { if (e.target.matches('input:not([readonly])')) colar(e, el); });

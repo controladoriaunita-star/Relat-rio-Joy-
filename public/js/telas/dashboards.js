@@ -1,7 +1,7 @@
 // Aba Dashboards: exposição de caixa (oculta, ver MOSTRAR_EXPOSICAO), gasto × projetado, recebimentos, custos por rubrica,
 // setores que mais gastaram e acerto da projeção. Os números vêm de /obra/dashboards, com as
 // mesmas definições do Resumo, do Painel e da Projeção.
-import { api, carregando, esc, fmt, montarGrafico } from '../util.js';
+import { api, carregando, esc, fmt, montarGrafico, trocouObra } from '../util.js';
 
 const COR = { c1: 'var(--chart-1)', c2: 'var(--chart-2)', c3: 'var(--chart-3)' };
 // Gráfico de exposição de caixa oculto a pedido da controladoria (out/2026). O cálculo continua
@@ -292,12 +292,13 @@ function cartaoAcerto(d) {
 
 // ------------------------------------------------------------------ tela
 export async function render(el, ctx) {
+  if (trocouObra('dashboards')) estado.setorGasto = '';      // setores mudam de uma obra para outra
   el.innerHTML = carregando(10);
   const d = await api(`/obra/dashboards?data=${ctx.dataBase}`);
   const desenhar = () => {
     el.innerHTML = `<div class="fade">
       <div class="cabecalho"><div>
-        <div class="eyebrow">Dashboards</div><h2>Caixa, custos e projeção</h2>
+        <div class="eyebrow">Dashboards · ${esc(ctx.obra.nome)}</div><h2>Caixa, custos e projeção</h2>
         <p>Mês corrente ${fmt.mesLongo(d.datas.mes_atual)} · realizado até ${fmt.mesLongo(d.datas.mes_analise)} · dados de ${fmt.dataHora(d.ultima_atualizacao)}</p>
       </div></div>
       <div class="dashboard">${MOSTRAR_EXPOSICAO ? cartaoExposicao(d) : ''}${cartaoGasto(d)}${cartaoRecebimentos(d)}${cartaoCustos(d)}${cartaoSetores(d)}${cartaoAcerto(d)}</div>

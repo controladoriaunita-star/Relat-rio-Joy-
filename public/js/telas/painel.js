@@ -1,6 +1,6 @@
 // Aba Painel: realizado x projetado x EVE e linha do tempo mensal (jan/2024 a dez/2030).
 // Regras de cálculo e correções em relação à planilha: backend/app/motor/painel.py.
-import { api, carregando, ehNumero, esc, fmt, focarMesCorrente, montarGrafico } from '../util.js';
+import { api, carregando, ehNumero, esc, fmt, focarMesCorrente, montarGrafico, trocouObra } from '../util.js';
 
 // Ordem e estilo das linhas, seguindo a aba Painel da planilha.
 const SECOES = [
@@ -134,7 +134,8 @@ function kpiConciliacao(c) {
     <p class="h">${confere ? `Extrato ${fmt.moeda(c.saldo_banco)}` : 'Diferença: revise classificações ou o ajuste do saldo'}</p></div>`;
 }
 
-export async function render(el, { dataBase }) {
+export async function render(el, { dataBase, obra }) {
+  if (trocouObra('painel')) anoSelecionado = null;
   el.innerHTML = carregando(12);
   const dados = await api(`/obra/painel?data=${dataBase}`);
   const linhas = Object.fromEntries(dados.linhas.map((l) => [l.linha_excel, l]));
@@ -158,7 +159,7 @@ export async function render(el, { dataBase }) {
 
   el.innerHTML = `<div class="fade">
     <div class="cabecalho"><div>
-      <div class="eyebrow">Painel · ${esc(dados.titulos.ate)}</div>
+      <div class="eyebrow">Painel · ${esc(obra.nome)} · ${esc(dados.titulos.ate)}</div>
       <h2>Realizado × Projetado × EVE</h2>
       <p>Realizado até ${fmt.mesLongo(dados.datas.mes_analise)} (fontes do SharePoint) · projetado de ${fmt.mesLongo(dados.datas.corte)} em diante (Projeção dos setores). Custos e despesas com sinal negativo.</p>
     </div>

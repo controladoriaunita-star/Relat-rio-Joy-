@@ -1,6 +1,6 @@
 // Aba Aportes: aportes feitos na SPE até a data-base, do investidor (aba Recebidas) e da
 // Joy+ (Transferências Bancárias para a SPE). Regras em backend/app/motor/aportes.py.
-import { api, carregando, esc, fmt } from '../util.js';
+import { api, carregando, esc, fmt, trocouObra } from '../util.js';
 
 let filtro = 'todos';     // todos | investidor | joy
 
@@ -49,13 +49,16 @@ function tabela(lancamentos) {
   </section>`;
 }
 
-export async function render(alvo, { dataBase }) {
+export async function render(alvo, { dataBase, obra }) {
+  if (trocouObra('aportes')) filtro = 'todos';
   alvo.innerHTML = carregando();
   const d = await api(`/obra/aportes?data=${dataBase}`);
   const desenhar = () => {
     alvo.innerHTML = `<div class="fade">
-      <div class="titulo-pagina" style="margin-bottom:16px"><h2 style="margin:0">Aportes até ${fmt.data(d.ate)}</h2>
-        <p class="muted" style="margin:4px 0 0">Investidores: aba Recebidas · Joy+: transferências de outras empresas para a SPE (73)
+      <div class="titulo-pagina" style="margin-bottom:16px"><div class="eyebrow">Aportes · ${esc(obra.nome)}</div>
+        <h2 style="margin:0">Aportes até ${fmt.data(d.ate)}</h2>
+        <p class="muted" style="margin:4px 0 0">Investidores: aba Recebidas · Joy+: transferências de outras empresas para a SPE
+        ${d.empresa_spe ? `(código UAU ${esc(d.empresa_spe)})` : '<span class="badge b-error">código UAU da obra não cadastrado</span>'}
         ${d.ultima_atualizacao ? ` · dados de ${fmt.dataHora(d.ultima_atualizacao)}` : ''}</p></div>
       ${kpis(d.totais)}${avisoApontamentos(d.apontamentos)}${tabela(d.lancamentos)}</div>`;
     alvo.querySelector('#filtro-aportes').onchange = (e) => { filtro = e.target.value; desenhar(); };

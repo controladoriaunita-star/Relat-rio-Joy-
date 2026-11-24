@@ -207,7 +207,7 @@ const SUB_ABAS = [
 export async function render(el, ctx) {
   const abas = SUB_ABAS.filter((a) => !a.permissao || ctx.usuario.permissoes[a.permissao]);
   if (!abas.some((a) => a.id === subAba)) subAba = 'fontes';
-  el.innerHTML = `<div class="fade"><div class="cabecalho"><div><div class="eyebrow">Validador de atualização</div>
+  el.innerHTML = `<div class="fade"><div class="cabecalho"><div><div class="eyebrow">Validador de atualização · ${esc(ctx.obra.nome)}</div>
       <h2>API's e dados de apoio</h2><p>Situação de cada tabela de origem, pendências e lançamentos manuais.</p></div></div>
     <div class="sub-abas" role="tablist">${abas.map((a) => `<button data-sub="${a.id}" class="${a.id === subAba ? 'on' : ''}">${a.titulo}</button>`).join('')}</div>
     <div id="sub-conteudo">${carregando(6)}</div></div>`;
