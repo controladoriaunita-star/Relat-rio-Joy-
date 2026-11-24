@@ -257,6 +257,7 @@ async function editarPremissas(recarregar) {
   const pctTexto = (v) => fmt.numero(v * 100).replace(/,00$/, '');
   const caixa = modal({
     titulo: 'Premissas do aporte',
+    fecharFora: false,
     conteudo: `<p>Valores informados manualmente. Custos, saldos e receitas do mês vêm das fontes.</p>
       <div class="grid" style="margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
         ${campo('caixa_minimo', 'Caixa mínimo (mês)')}${campo('caixa_minimo_proximo', 'Caixa mínimo (próximo)')}

@@ -144,6 +144,7 @@ export function editarViabilidade(ctx) {
   const caixa = modal({
     titulo: `Viabilidade · ${ctx.obra.nome}`,
     conteudo: '<div data-viab><div class="skel"></div></div>',
+    fecharFora: false,                       // formulário longo: fecha só por Cancelar ou Esc
     acoes: [{ rotulo: 'Salvar viabilidade', classe: 'primary', ao: async () => {
       if (!salvar) return false;
       await salvar();
@@ -153,5 +154,8 @@ export function editarViabilidade(ctx) {
   caixa.querySelector('.modal').classList.add('modal-largo');
   montarViabilidade(caixa.querySelector('[data-viab]'), { obra: ctx.obra, obras: ctx.obras, pode: true })
     .then((f) => { salvar = f; })
-    .catch((erro) => { erroToast(erro); caixa.remove(); });
+    .catch((erro) => {                       // mostra o erro no próprio modal (antes ele sumia)
+      caixa.querySelector('[data-viab]').innerHTML = `<div class="alert a-error"><b>Não foi possível carregar a viabilidade</b>
+        <div>${esc(erro.message)}</div></div>`;
+    });
 }

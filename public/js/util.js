@@ -87,8 +87,11 @@ export function toast(titulo, { tipo = 'success', texto = '', duracao = 3500 } =
 
 export const erroToast = (erro) => toast('Não foi possível concluir', { tipo: 'error', texto: erro.message, duracao: 6000 });
 
-/** Abre um modal; `acoes` = [{rotulo, classe, ao}] — `ao` pode devolver false para manter aberto. */
-export function modal({ titulo, conteudo = '', acoes = [] }) {
+/**
+ * Abre um modal; `acoes` = [{rotulo, classe, ao}] — `ao` pode devolver false para manter aberto.
+ * `fecharFora`: clicar no fundo escuro fecha (desligue em formulários longos, para não perder o digitado).
+ */
+export function modal({ titulo, conteudo = '', acoes = [], fecharFora = true }) {
   const overlay = document.createElement('div');
   overlay.className = 'overlay';
   overlay.innerHTML = `<div class="card modal" role="dialog" aria-modal="true" aria-label="${esc(titulo)}">
@@ -109,7 +112,11 @@ export function modal({ titulo, conteudo = '', acoes = [] }) {
     };
     rodape.append(botao);
   }
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) fechar(); });
+  // Só fecha se o clique começou E terminou no fundo: selecionar o texto de um campo arrastando
+  // o mouse para fora do cartão gera um "click" no fundo e fechava o modal com o que foi digitado.
+  let inicioNoFundo = false;
+  overlay.addEventListener('mousedown', (e) => { inicioNoFundo = e.target === overlay; });
+  overlay.addEventListener('click', (e) => { if (fecharFora && inicioNoFundo && e.target === overlay) fechar(); });
   overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') fechar(); });
   document.body.append(overlay);
   overlay.querySelector('input, select, button')?.focus();
