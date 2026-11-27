@@ -1,4 +1,5 @@
-// Sessão do usuário: Supabase Auth em produção; seletor de perfil no modo local de desenvolvimento.
+// Sessão do usuário: login Microsoft 365 (modo "entra", sessão em cookie httpOnly), Supabase Auth
+// ou seletor de perfil no modo local de desenvolvimento.
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 const CHAVE_LOCAL = 'aporte_usuario_local';
 
@@ -28,13 +29,25 @@ export async function iniciarSessao() {
 }
 
 export const modoLocal = () => configuracao?.modo === 'local';
+// Login Microsoft 365: o navegador não guarda token; o cookie de sessão vai sozinho em cada chamada.
+export const modoMicrosoft = () => configuracao?.modo === 'entra';
+export const dominioMicrosoft = () => configuracao?.dominio || '';
+export function entrarMicrosoft() { location.href = '/api/auth/microsoft/login'; }
+
+/** Erro devolvido pelo retorno do login Microsoft (?erro_login=...); lido uma vez e tirado da URL. */
+export function erroDoLogin() {
+  const parametros = new URLSearchParams(location.search);
+  const erro = parametros.get('erro_login');
+  if (erro) history.replaceState(null, '', location.pathname + location.hash);
+  return erro || '';
+}
 // Login temporariamente inativo (APORTE_LOGIN_ATIVO=0): a API usa um perfil fixo.
 export const semLogin = () => configuracao?.modo === 'sem_login';
 export const usuariosLocais = () => configuracao?.usuarios || [];
 export const precisaDefinirSenha = () => definirSenhaPendente;
 
 export async function token() {
-  if (semLogin()) return null;
+  if (semLogin() || modoMicrosoft()) return null;
   if (modoLocal()) {
     const id = lerLocal();
     return id ? `local:${id}` : null;
@@ -52,6 +65,7 @@ export function entrarLocal(usuarioId) { gravarLocal(usuarioId); }
 
 export async function sair() {
   if (modoLocal()) return gravarLocal(null);
+  if (modoMicrosoft()) return void await fetch('/api/auth/sair', { method: 'POST' });
   await cliente.auth.signOut();
 }
 

@@ -3,6 +3,7 @@
 // Os gráficos ficam na aba Dashboards.
 import { abrirRubrica } from './rubrica_card.js';
 import { editarViabilidade } from './viabilidade.js';
+import { gerarPdfBase64 } from '../pdf.js';
 import { api, carregando, ehNumero, esc, fmt, lerNumero, modal, toast } from '../util.js';
 
 const GRUPOS = [
@@ -333,6 +334,71 @@ async function editarPremissas(recarregar) {
   };
 }
 
+// ------------------------------------------------------------------ envio por e-mail
+const separarEmails = (texto) => String(texto || '').split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter(Boolean);
+const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** PDF do Resumo (o mesmo da impressão) pela conta Microsoft de quem está logado. */
+async function enviarPorEmail(relatorio, ctx, d) {
+  const { usuario, obra } = ctx;
+  const destinatarios = await api('/obra/email/destinatarios');
+  const mes = fmt.mesLongo(d.datas.mes_atual);
+  const assunto = `Relatório de Aporte · ${obra.nome} · ${mes}`;
+  const mensagem = `Olá,
+
+Segue em anexo o Relatório de Aporte da obra ${obra.nome} referente a ${mes}.
+
+Atenciosamente,
+${usuario.nome || ''}`;
+  const salvos = () => (destinatarios.length
+    ? destinatarios.map((x) => `<label class="destinatario"><input type="checkbox" name="salvo" value="${esc(x.email)}" />
+        <span>${esc(x.email)}</span>${x.ultimo_envio ? `<small>último envio ${fmt.data(x.ultimo_envio)}</small>` : ''}
+        <button type="button" class="btn ghost sm remover" data-id="${x.id}" title="Tirar da lista" aria-label="Tirar ${esc(x.email)} da lista">×</button></label>`).join('')
+    : '<small>Nenhum destinatário salvo ainda nesta obra.</small>');
+  const caixa = modal({
+    titulo: 'Enviar Resumo por e-mail',
+    fecharFora: false,
+    conteudo: `<div class="grid envio-email">
+      <div class="field"><label>Destinatários salvos</label><div class="lista-destinatarios">${salvos()}</div></div>
+      <div class="field"><label for="novos-dest">Novos destinatários</label>
+        <input id="novos-dest" name="novos" type="text" placeholder="nome@empresa.com.br; outro@empresa.com.br" autocomplete="off" />
+        <small>Separe por ponto e vírgula. Ficam salvos nesta obra para os próximos envios.</small></div>
+      <div class="field"><label for="assunto-email">Assunto</label><input id="assunto-email" name="assunto" value="${esc(assunto)}" /></div>
+      <div class="field"><label for="mensagem-email">Mensagem</label><textarea id="mensagem-email" name="mensagem" rows="6">${esc(mensagem)}</textarea></div>
+      <small class="nota-envio">Sai da sua conta (${esc(usuario.email)}) e fica nos seus Itens Enviados. O anexo é o PDF do Resumo, igual ao da impressão.</small>
+    </div>`,
+    acoes: [{ rotulo: 'Enviar', classe: 'primary', ao: async (el) => {
+      const para = [...el.querySelectorAll('[name=salvo]:checked')].map((c) => c.value)
+        .concat(separarEmails(el.querySelector('[name=novos]').value));
+      const invalidos = para.filter((e) => !EMAIL.test(e));
+      if (invalidos.length) throw new Error(`E-mail inválido: ${invalidos.join(', ')}`);
+      if (!para.length) throw new Error('Marque ou digite ao menos um destinatário.');
+      const botao = el.querySelector('.foot .primary');
+      botao.innerHTML = '<span class="spin"></span>Gerando PDF';
+      try {
+        const pdf = await gerarPdfBase64(relatorio);
+        botao.innerHTML = '<span class="spin"></span>Enviando';
+        const r = await api('/obra/resumo/enviar', { metodo: 'POST', corpo: {
+          para, assunto: el.querySelector('[name=assunto]').value, mensagem: el.querySelector('[name=mensagem]').value,
+          nome_arquivo: `Relatório de Aporte - ${obra.nome} - ${mes.replace('/', '-')}.pdf`, pdf_base64: pdf,
+        } });
+        toast('E-mail enviado', { texto: `Para ${r.enviado_para.join(', ')}` });
+      } finally { botao.textContent = 'Enviar'; }
+    } }],
+  });
+  caixa.querySelector('.lista-destinatarios').addEventListener('click', async (e) => {
+    const botao = e.target.closest('.remover');
+    if (!botao) return;
+    e.preventDefault();
+    botao.disabled = true;
+    try {
+      await api(`/obra/email/destinatarios/${botao.dataset.id}`, { metodo: 'DELETE' });
+      destinatarios.splice(destinatarios.findIndex((x) => String(x.id) === botao.dataset.id), 1);
+      caixa.querySelector('.lista-destinatarios').innerHTML = salvos();
+    } catch (erro) { botao.disabled = false; toast('Não foi possível tirar da lista', { tipo: 'error', texto: erro.message }); }
+  });
+}
+
 // ------------------------------------------------------------------ tela
 export async function render(el, ctx) {
   const { usuario, dataBase, recarregar, obra } = ctx;
@@ -345,6 +411,7 @@ export async function render(el, ctx) {
     </div><div class="row-flex sem-impressao">
       ${usuario.permissoes['premissas.editar'] ? `<button class="btn secondary sm" id="viabilidade" title="Viabilidade (EVE) por rubrica de ${esc(obra.nome)}">Viabilidade</button>
         <button class="btn secondary sm" id="premissas">Premissas</button>` : ''}
+      ${usuario.permissoes['resumo.enviar'] ? '<button class="btn secondary sm" id="enviar-email">Enviar por e-mail</button>' : ''}
       <button class="btn secondary sm" onclick="window.print()">Imprimir</button></div></div>
     <div class="resumo-planilha">
       <section class="relatorio-aporte" aria-label="Relatório de Aporte">
@@ -354,6 +421,7 @@ export async function render(el, ctx) {
     </div>
   </div>`;
   el.querySelector('#premissas')?.addEventListener('click', () => editarPremissas(recarregar));
+  el.querySelector('#enviar-email')?.addEventListener('click', () => enviarPorEmail(el.querySelector('.fade'), ctx, d));
   el.querySelector('.relatorio-aporte').addEventListener('click', (e) => {
     const botao = e.target.closest('[data-info]');
     if (botao) abrirInfo(botao);

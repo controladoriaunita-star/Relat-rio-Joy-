@@ -40,6 +40,23 @@ SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")   # só projetos com HS256
 
+def _env(chave: str, padrao: str = "") -> str:
+    """Valor do ambiente sem espaços nem aspas em volta (cola comum na Vercel)."""
+    valor = os.environ.get(chave, padrao).strip()
+    return valor[1:-1] if len(valor) > 1 and valor[0] == valor[-1] and valor[0] in "'\"" else valor
+
+
+# Login Microsoft 365 (Entra ID): AUTH_MODE=entra troca o login do Supabase pelo da Microsoft.
+# O usuário continua cadastrado no app (API's › Usuários); a Microsoft só confirma quem ele é.
+AUTH_MODE = _env("AUTH_MODE").lower()
+ENTRA_TENANT_ID = _env("ENTRA_TENANT_ID")
+ENTRA_CLIENT_ID = _env("ENTRA_CLIENT_ID")
+ENTRA_CLIENT_SECRET = _env("ENTRA_CLIENT_SECRET")
+ENTRA_DOMINIO = _env("ENTRA_DOMINIO", "unitaengenharia.com.br").lower()
+APP_URL = _env("APP_URL").rstrip("/")             # vazio = endereço da própria requisição
+SESSAO_SEGREDO = _env("SESSAO_SEGREDO")           # assina o cookie de sessão e cifra o token de e-mail
+SESSAO_HORAS = 12
+
 GRAPH_TENANT_ID = os.environ.get("GRAPH_TENANT_ID", "")
 GRAPH_CLIENT_ID = os.environ.get("GRAPH_CLIENT_ID", "")
 GRAPH_CLIENT_SECRET = os.environ.get("GRAPH_CLIENT_SECRET", "")

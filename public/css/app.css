@@ -422,16 +422,52 @@ main { padding: 24px var(--gutter) 96px; }
 .toasts { position: fixed; right: 20px; top: 72px; z-index: 60; display: flex; flex-direction: column; gap: 8px; }
 .toast { min-width: 260px; max-width: 380px; box-shadow: var(--shadow-overlay); animation: subir .2s var(--ease); }
 
-.login {
-  min-height: 100vh; display: grid; place-items: center; padding: 24px; position: relative; overflow: hidden;
-  background: radial-gradient(1200px 600px at 10% -10%, rgb(124 88 255 / .10), transparent 60%),
-              radial-gradient(900px 500px at 110% 110%, rgb(0 190 197 / .10), transparent 60%), var(--bg);
+/* ---------------------------------------------------------------- Login (identidade Joy+)
+   Painel da marca à esquerda (logo com tagline, sorriso do "y" e o "+" azul) e o acesso à direita.
+   No celular o painel vira uma faixa no topo. */
+.login { min-height: 100vh; display: grid; grid-template-columns: minmax(360px, 1.05fr) 1fr; background: var(--surface); }
+.login-marca {
+  position: relative; overflow: hidden; color: #fff; padding: 56px 64px;
+  display: flex; flex-direction: column; gap: 56px;
+  background: radial-gradient(900px 520px at 0% 0%, rgb(255 255 255 / .10), transparent 60%),
+              linear-gradient(150deg, var(--color-primary) 0%, var(--color-brand-deep) 100%);
 }
-.login .card { width: 100%; max-width: 400px; padding: 32px; position: relative; }
-.login img { height: 56px; display: block; margin-bottom: 24px; }
-.login h1 { font-size: 22px; }
-.login p { color: var(--muted); margin: 6px 0 24px; }
-.login form { display: grid; gap: 14px; }
+.login-logo { width: min(340px, 78%); height: auto; display: block; position: relative; z-index: 1; }
+.login-marca-texto { position: relative; z-index: 1; max-width: 400px; }
+.login-marca-texto .eyebrow { color: rgb(255 255 255 / .72); }
+.login-marca-texto h2 { font-size: clamp(24px, 2.4vw, 32px); line-height: 1.2; margin-top: 10px; font-weight: 600; }
+.login-marca-texto p { color: rgb(255 255 255 / .8); margin: 12px 0 0; font-size: 15px; line-height: 1.55; }
+/* Sorriso do "y" e o "+" azul no canto de baixo, sempre inteiros dentro do painel. */
+.login-desenho { position: absolute; right: 24px; bottom: 0; width: min(420px, 82%); height: auto; pointer-events: none; }
+.login-desenho .sorriso { fill: none; stroke: rgb(255 255 255 / .12); stroke-width: 40; }
+.login-desenho .mais { fill: var(--color-brand-blue); opacity: .9; }
+
+.login-painel { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 24px 24px;
+  background: radial-gradient(700px 420px at 100% 100%, var(--color-primary-soft), transparent 70%), var(--surface); }
+.login-card { width: 100%; max-width: 380px; margin: auto 0; }
+.login-card .logo-mini { display: none; }
+.login-card .eyebrow { color: var(--color-primary); }
+.login-card h1 { font-size: 28px; margin-top: 8px; }
+.login-card > p { color: var(--muted); margin: 8px 0 28px; font-size: 15px; }
+.login-card form, .login-card .acesso { display: grid; gap: 14px; }
+.login-card .btn { height: 48px; font-size: 15px; }
+.login-card .field input, .login-card .field select { height: 44px; }
+.btn-microsoft { gap: 12px; }
+.btn-microsoft .ms-logo { width: 20px; height: 20px; padding: 3px; background: #fff; border-radius: 4px; box-sizing: content-box; }
+.login .nota-login { color: var(--muted); text-align: center; font-size: 13px; }
+.login-rodape { margin-top: 32px; font-size: 12px; color: var(--ink-400); display: flex; align-items: center; gap: 6px; }
+.login-rodape::before { content: "+"; color: var(--color-brand-blue); font-weight: 700; }
+
+@media (max-width: 860px) {
+  .login { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .login-marca { padding: 28px 24px; flex-direction: row; align-items: center; }
+  .login-logo { width: 168px; }
+  .login-marca-texto { display: none; }
+  .login-desenho { width: 150px; right: 16px; bottom: 0; }
+  .login-painel { padding: 40px 16px 20px; justify-content: flex-start; }
+  .login-card { margin: 0 0 auto; }
+  .login-card h1 { font-size: 24px; }
+}
 
 .fade { animation: aparecer .25s ease-out; }
 
@@ -669,3 +705,15 @@ main { padding: 24px var(--gutter) 96px; }
 }
 .lista-rubrica .so-celular { display: none; }
 @media (max-width: 560px) { .lista-rubrica .so-celular { display: inline; } }
+
+/* Resumo: envio por e-mail */
+.envio-email textarea { width: 100%; border-radius: var(--r-control); border: 1px solid var(--border); background: #fff;
+  padding: 10px 12px; color: var(--text); font: inherit; resize: vertical; }
+.envio-email textarea:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-ring); }
+.lista-destinatarios { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; }
+.destinatario { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 400 !important; padding: 2px 0; }
+.destinatario input { width: auto !important; height: auto !important; }
+.destinatario span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.destinatario small { white-space: nowrap; }
+.destinatario .remover { padding: 0 8px; }
+.nota-envio { color: var(--muted); font-size: 12px; }
