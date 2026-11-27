@@ -9,6 +9,8 @@
   --color-brand-teal: #00bec5;
   --color-brand-sand: #e2d9d6;
   --color-brand-violet: #bf55ff;
+  --color-brand-blue: #3dafff;       /* Pantone 639C: o "+" da marca */
+  --color-brand-deep: #4b3fa3;       /* fundo do painel da marca no login (primário escurecido) */
 
   /* Semântica. Roxo "empoeirado" derivado do 2090C: mesma matiz da marca, menos saturado,
      agradável em áreas grandes e com contraste AA (5,1:1) com branco. */

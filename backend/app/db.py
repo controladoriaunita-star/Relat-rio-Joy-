@@ -65,6 +65,11 @@ CREATE INDEX IF NOT EXISTS ix_cargas_obra_fonte ON cargas (obra, fonte, id);
 CREATE TABLE IF NOT EXISTS historico (
     id INTEGER PRIMARY KEY, quando TEXT NOT NULL, usuario TEXT, acao TEXT NOT NULL, detalhe TEXT,
     obra TEXT);
+CREATE TABLE IF NOT EXISTS tokens_microsoft (
+    usuario_id TEXT PRIMARY KEY, refresh_token TEXT NOT NULL, atualizado_em TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS destinatarios_email (
+    id INTEGER PRIMARY KEY, obra TEXT NOT NULL REFERENCES obras(codigo), email TEXT NOT NULL,
+    criado_por TEXT, criado_em TEXT NOT NULL, ultimo_envio TEXT, UNIQUE (obra, email));
 CREATE TABLE IF NOT EXISTS controle (id INTEGER PRIMARY KEY CHECK (id = 1), versao INTEGER NOT NULL);
 INSERT INTO controle (id, versao) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
 """
@@ -165,6 +170,11 @@ class Banco:
         with self._trava:
             return [dict(r) for r in self._executar(self._conexao(), sql, args).fetchall()]
 
+    def executar(self, sql: str, *args) -> None:
+        """Escrita avulsa que não mexe nos números do relatório (não invalida os caches de cálculo)."""
+        with self._trava:
+            self._executar(self._conexao(), sql, args)
+
     def um(self, sql: str, *args) -> dict | None:
         linhas = self.todos(sql, *args)
         return linhas[0] if linhas else None
@@ -186,9 +196,14 @@ class Banco:
                         (obra, chave, para_json(valor)))
 
     def registrar(self, con, usuario: str | None, acao: str, detalhe=None, obra: str | None = None) -> None:
-        """Histórico de ações; `obra` vazio = ação global (usuários, permissões, cadastro de obras)."""
-        con.execute("INSERT INTO historico (quando, usuario, acao, detalhe, obra) VALUES (?, ?, ?, ?, ?)",
-                    (agora(), usuario, acao, para_json(detalhe) if detalhe is not None else None, obra))
+        """Histórico de ações; `obra` vazio = ação global (usuários, permissões, cadastro de obras).
+        Com `con` None grava fora de transação (ação que não altera os números do relatório)."""
+        args = (agora(), usuario, acao, para_json(detalhe) if detalhe is not None else None, obra)
+        sql = "INSERT INTO historico (quando, usuario, acao, detalhe, obra) VALUES (?, ?, ?, ?, ?)"
+        if con is None:
+            self.executar(sql, *args)
+        else:
+            con.execute(sql, args)
 
 
 class _Executor:

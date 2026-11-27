@@ -33,13 +33,29 @@ const emBreve = (aba) => (estado.usuario.em_breve || []).includes(aba.id);
 const abasVisiveis = () => ABAS.filter((a) => !a.permissao || estado.usuario.permissoes[a.permissao]);
 
 // ------------------------------------------------------------------ telas de acesso
+// Sorriso (a curva do "y" da marca) e o "+" azul, como grafismo do painel da marca.
+const DESENHO_MARCA = `<svg class="login-desenho" viewBox="0 0 480 300" aria-hidden="true">
+  <path class="sorriso" d="M40 40 A 200 200 0 0 0 440 40" />
+  <path class="mais" d="M372 0h20v34h34v20h-34v34h-20v-34h-34v-20h34z" /></svg>`;
+
 function cartaoAcesso(titulo, subtitulo, corpo) {
-  raiz.innerHTML = `<div class="login"><div class="card fade">
-    <img src="/assets/logo-joy.png" alt="Joy+" />
-    <div class="eyebrow">Joy+ · Controladoria</div>
-    <h1>${esc(titulo)}</h1><p>${esc(subtitulo)}</p>${corpo}</div></div>`;
-  return raiz.querySelector('.card');
+  raiz.innerHTML = `<div class="login">
+    <aside class="login-marca">
+      <img class="login-logo" src="/assets/logo-joy-tagline-branco.png" alt="Joy+ · a felicidade mora aqui" />
+      <div class="login-marca-texto"><div class="eyebrow">Controladoria</div>
+        <h2>Relatório de Aporte</h2>
+        <p>Custos, despesas, projeção e aportes de cada obra, num só lugar.</p></div>
+      ${DESENHO_MARCA}
+    </aside>
+    <section class="login-painel"><div class="login-card fade">
+      <div class="eyebrow">Joy+ · Controladoria</div>
+      <h1>${esc(titulo)}</h1><p>${esc(subtitulo)}</p>${corpo}</div>
+      <div class="login-rodape">Unità Engenharia · uso interno</div></section></div>`;
+  return raiz.querySelector('.login-card');
 }
+
+const LOGO_MICROSOFT = `<svg class="ms-logo" viewBox="0 0 21 21" aria-hidden="true"><path fill="#f25022" d="M0 0h10v10H0z"/>
+  <path fill="#7fba00" d="M11 0h10v10H11z"/><path fill="#00a4ef" d="M0 11h10v10H0z"/><path fill="#ffb900" d="M11 11h10v10H11z"/></svg>`;
 
 function aguardar(botao, texto) {
   botao.disabled = true;
@@ -48,9 +64,20 @@ function aguardar(botao, texto) {
 
 function telaLogin(mensagem = '') {
   const alerta = mensagem ? `<div class="alert a-error"><b>${esc(mensagem)}</b></div>` : '';
+  if (sessao.modoMicrosoft()) {
+    const dominio = sessao.dominioMicrosoft();
+    const cartao = cartaoAcesso('Bem-vindo', 'Entre com a sua conta corporativa para acessar o relatório.', `
+      <div class="acesso">${alerta}
+        <button class="btn primary btn-microsoft" type="button" id="entrar-microsoft">${LOGO_MICROSOFT}Entrar com Microsoft 365</button>
+        ${dominio ? `<small class="nota-login">Use sua conta @${esc(dominio)}.</small>` : ''}</div>`);
+    const botao = cartao.querySelector('#entrar-microsoft');
+    botao.focus();
+    botao.onclick = () => { aguardar(botao, 'Abrindo a Microsoft'); sessao.entrarMicrosoft(); };
+    return;
+  }
   if (sessao.modoLocal()) {
     const usuarios = sessao.usuariosLocais();
-    const cartao = cartaoAcesso('Relatório de Aporte', 'Modo local de desenvolvimento: escolha um perfil.', `
+    const cartao = cartaoAcesso('Bem-vindo', 'Modo local de desenvolvimento: escolha um perfil.', `
       <form id="form-login" class="grid">
         <div class="field"><label for="usuario">Usuário</label><select id="usuario">
           ${usuarios.map((u) => `<option value="${esc(u.usuario_id)}">${esc(u.nome)} · ${esc(u.perfil)}</option>`).join('')}
@@ -59,7 +86,7 @@ function telaLogin(mensagem = '') {
     cartao.querySelector('form').onsubmit = (e) => { e.preventDefault(); sessao.entrarLocal(cartao.querySelector('#usuario').value); iniciar(); };
     return;
   }
-  const cartao = cartaoAcesso('Relatório de Aporte', 'Análise de custos e projeção de aportes.', `
+  const cartao = cartaoAcesso('Bem-vindo', 'Entre com seu e-mail e senha para acessar o relatório.', `
     <form id="form-login" class="grid" novalidate>
       <div class="field"><label for="email">E-mail</label><input id="email" type="email" autocomplete="username" required /></div>
       <div class="field"><label for="senha">Senha</label><input id="senha" type="password" autocomplete="current-password" required /></div>
@@ -109,7 +136,7 @@ function montarShell() {
         ${sessao.modoLocal() ? `<label class="troca-perfil" title="Modo local: troque de perfil para testar os acessos">
           <span>Perfil</span><select id="trocar-perfil">${sessao.usuariosLocais().map((l) => `<option value="${esc(l.usuario_id)}" ${l.usuario_id === u.usuario_id ? 'selected' : ''}>${esc(l.nome)}</option>`).join('')}</select></label>`
           : `<div class="u"><b>${esc(u.nome)}</b><span>${esc(u.perfil_nome)}</span></div>`}
-        ${sessao.modoLocal() || sessao.semLogin() ? '' : '<button class="btn inverse sm" id="conta">Conta</button>'}
+        ${sessao.modoLocal() || sessao.semLogin() || sessao.modoMicrosoft() ? '' : '<button class="btn inverse sm" id="conta">Conta</button>'}
         ${sessao.semLogin() ? '' : '<button class="btn inverse sm" id="sair">Sair</button>'}
       </div>
     </div></header>
@@ -199,6 +226,8 @@ async function recarregarObras(abrir) {
 
 async function iniciar() {
   if (sessao.precisaDefinirSenha()) return telaDefinirSenha();
+  const erroLogin = sessao.erroDoLogin();
+  if (erroLogin) return telaLogin(erroLogin);
   try {
     [estado.usuario, estado.obras] = await Promise.all([api('/api/eu'), api('/api/obras')]);
     estado.obras = estado.obras.filter((o) => o.ativo !== false);

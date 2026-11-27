@@ -68,6 +68,9 @@ def modo_local(banco: Banco) -> bool:
 def criar_verificador(banco: Banco) -> Verificador:
     if modo_local(banco):
         return VerificadorLocal()
+    from . import microsoft                  # import tardio: microsoft importa este módulo
+    if microsoft.modo_entra():
+        return microsoft.VerificadorEntra()
     if not config.SUPABASE_URL:
         raise RuntimeError("SUPABASE_URL não configurada (ou ative APORTE_AUTH_LOCAL=1 em desenvolvimento).")
     return VerificadorSupabase()

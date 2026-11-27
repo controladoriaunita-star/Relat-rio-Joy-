@@ -220,6 +220,7 @@ PAPEIS_GERAIS = {
 }
 PERMISSOES = {
     "resumo.ver": "Ver a aba Resumo",
+    "resumo.enviar": "Enviar o Resumo em PDF por e-mail (sai da conta Microsoft de quem envia)",
     "dashboards.ver": "Ver a aba Dashboards",
     "painel.ver": "Ver a aba Painel",
     "projecao.ver": "Ver a aba Projeção e editar as linhas do próprio setor",

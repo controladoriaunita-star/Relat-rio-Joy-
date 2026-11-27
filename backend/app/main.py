@@ -6,17 +6,20 @@ Local: python -m uvicorn backend.app.main:criar_app --factory --port 8060
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import dataclasses
 import os
 from datetime import date
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, config
+from . import auth, config, microsoft
 from .catalogo import ABAS_EM_BREVE, PAPEL_ADMIN
 from .db import Banco, ErroIntegridade, hoje
 from .fontes.definicoes import FONTES
@@ -81,6 +84,14 @@ class Concessao(BaseModel):
     concedida: bool
 
 
+class EnvioResumo(BaseModel):
+    para: list[str]
+    assunto: str = ""
+    mensagem: str = ""
+    nome_arquivo: str = "Relatorio de Aporte.pdf"
+    pdf_base64: str
+
+
 class ArquivosEstaticos(StaticFiles):
     """Interface servida localmente, sempre revalidada para cada versão nova chegar ao usuário."""
 
@@ -99,6 +110,7 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
     if login_ativo:
         verificador = verificador or auth.criar_verificador(banco)
     local = isinstance(verificador, auth.VerificadorLocal)
+    entra = isinstance(verificador, microsoft.VerificadorEntra)
 
     app = FastAPI(title="Relatório de Aporte · Joy+", docs_url="/api/docs",
                   openapi_url="/api/openapi.json", redoc_url=None)
@@ -134,6 +146,8 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
             return auth.usuario_sem_login(banco)
         cabecalho = request.headers.get("Authorization", "")
         token = cabecalho[7:] if cabecalho.lower().startswith("bearer ") else None
+        if not token and entra:                  # login Microsoft: sessão no cookie httpOnly
+            token = request.cookies.get(microsoft.COOKIE_SESSAO)
         usuario = auth.usuario_do_token(banco, verificador, token)
         if not usuario:
             raise HTTPException(401, "Sessão expirada ou usuário sem perfil. Entre novamente.")
@@ -161,8 +175,65 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
             return {"modo": "sem_login"}
         if local:
             return {"modo": "local", "usuarios": [u for u in servico.listar_usuarios() if u["ativo"] and u["papeis"]]}
+        if entra:
+            return {"modo": "entra", "dominio": config.ENTRA_DOMINIO}
         return {"modo": "supabase", "supabase_url": config.SUPABASE_URL,
                 "supabase_anon_key": config.SUPABASE_ANON_KEY}
+
+    # ------------------------------------------------------------------ login Microsoft 365
+    def _https(request: Request) -> bool:
+        return request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+
+    def _url_app(request: Request) -> str:
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+        return f"{'https' if _https(request) else 'http'}://{host}"
+
+    def _voltar_com_erro(mensagem: str) -> RedirectResponse:
+        resposta = RedirectResponse(f"/?erro_login={quote(mensagem)}", status_code=303)
+        resposta.delete_cookie(microsoft.COOKIE_ESTADO, path="/api/auth")
+        return resposta
+
+    @app.get("/api/auth/microsoft/login")
+    def login_microsoft(request: Request):
+        if not entra:
+            raise HTTPException(404, "Login Microsoft desligado (AUTH_MODE).")
+        try:
+            url, estado = microsoft.url_autorizacao(_url_app(request))
+        except auth.ErroAutenticacao as erro:
+            return _voltar_com_erro(str(erro))
+        resposta = RedirectResponse(url, status_code=303)
+        resposta.set_cookie(microsoft.COOKIE_ESTADO, estado, max_age=600, httponly=True, samesite="lax",
+                            secure=_https(request), path="/api/auth")
+        return resposta
+
+    @app.get("/api/auth/microsoft/callback")
+    def callback_microsoft(request: Request, code: str = "", state: str = "", error_description: str = ""):
+        if not entra:
+            raise HTTPException(404, "Login Microsoft desligado (AUTH_MODE).")
+        if not code:
+            return _voltar_com_erro(error_description.splitlines()[0] if error_description else "Login cancelado.")
+        try:
+            usuario_id = microsoft.concluir_login(banco, code, state, request.cookies.get(microsoft.COOKIE_ESTADO),
+                                                  _url_app(request))
+        except auth.ErroAutenticacao as erro:
+            return _voltar_com_erro(str(erro))
+        except Exception:                        # rede/Microsoft fora: mensagem curta, sem detalhes internos
+            return _voltar_com_erro("Não foi possível falar com a Microsoft. Tente de novo.")
+        valor, duracao = microsoft.emitir_sessao(usuario_id)
+        resposta = RedirectResponse("/", status_code=303)
+        resposta.delete_cookie(microsoft.COOKIE_ESTADO, path="/api/auth")
+        resposta.set_cookie(microsoft.COOKIE_SESSAO, valor, max_age=duracao, httponly=True, samesite="lax",
+                            secure=_https(request), path="/")
+        return resposta
+
+    @app.post("/api/auth/sair")
+    def sair(request: Request):
+        claims = microsoft.ler_assinado(request.cookies.get(microsoft.COOKIE_SESSAO)) if entra else None
+        if claims:
+            microsoft.apagar_token(banco, claims["sub"])
+        resposta = JSONResponse({"ok": True})
+        resposta.delete_cookie(microsoft.COOKIE_SESSAO, path="/")
+        return resposta
 
     @app.get("/api/eu")
     def eu(usuario: dict = Depends(usuario_atual)):
@@ -310,6 +381,25 @@ def criar_app(servico: Servico | None = None, verificador: auth.Verificador | No
     def salvar_linha(dados: dict, so: ServicoObra = Depends(servico_obra),
                      usuario: dict = Depends(exigir("setores.gerenciar"))):
         return {"id": so.salvar_linha(dados, usuario)}
+
+    @obra.get("/email/destinatarios")
+    def destinatarios(so: ServicoObra = Depends(servico_obra), _: dict = Depends(exigir("resumo.enviar"))):
+        return so.destinatarios()
+
+    @obra.delete("/email/destinatarios/{destinatario_id}")
+    def remover_destinatario(destinatario_id: int, so: ServicoObra = Depends(servico_obra),
+                             usuario: dict = Depends(exigir("resumo.enviar"))):
+        so.remover_destinatario(destinatario_id, usuario)
+        return {"ok": True}
+
+    @obra.post("/resumo/enviar")
+    def enviar_resumo(dados: EnvioResumo, so: ServicoObra = Depends(servico_obra),
+                      usuario: dict = Depends(exigir("resumo.enviar"))):
+        try:
+            pdf = base64.b64decode(dados.pdf_base64, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(422, "PDF inválido.")
+        return so.enviar_resumo(usuario, dados.para, dados.assunto, dados.mensagem, pdf, dados.nome_arquivo)
 
     @obra.get("/historico")
     def historico(limite: int = 200, so: ServicoObra = Depends(servico_obra),

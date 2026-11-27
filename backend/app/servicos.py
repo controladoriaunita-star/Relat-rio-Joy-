@@ -6,7 +6,9 @@ migração da planilha. Todo dado de obra é lido e gravado filtrado pela obra.
 """
 from __future__ import annotations
 
+import html
 import json
+import re
 import time
 import uuid
 from collections import defaultdict
@@ -35,6 +37,8 @@ from .obras import CODIGO_VALIDO, OBRA_PADRAO, OBRAS_PADRAO, Obra
 
 TIPO_PROJETADO = "Projetado"
 TIPO_PROJETADO_TOTAL = "Projetado Total"
+EMAIL_VALIDO = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
+MAX_DESTINATARIOS = 30
 
 
 class ErroNegocio(Exception):
@@ -52,8 +56,10 @@ class ObraNaoEncontrada(ErroNegocio):
 # ======================================================================== global
 class Servico:
     def __init__(self, banco: Banco, graph: ClienteGraph | None = None,
-                 admin: auth.AdminUsuarios | None = None):
+                 admin: auth.AdminUsuarios | None = None, enviar_email=None):
+        from . import microsoft
         self.banco = banco
+        self.enviar_email = enviar_email or microsoft.enviar_email     # trocado nos testes
         self.graph = graph or ClienteGraph()
         self.admin = admin or (auth.AdminLocal() if auth.modo_local(banco) else auth.AdminSupabase())
         self._caches: dict[str, dict] = defaultdict(dict)     # cache de cálculo por obra
@@ -520,6 +526,59 @@ class ServicoObra:
         with self.banco.transacao() as con:
             self._registrar(con, usuario, "cronograma.salvar", {"mes": chave, "parcelas": normalizadas})
         return self.premissas()
+
+    # ---------------------------------------------------------------- envio do Resumo por e-mail
+    def destinatarios(self) -> list[dict]:
+        """E-mails já usados nesta obra, para marcar de novo nos próximos envios."""
+        return self.banco.todos("SELECT id, email, ultimo_envio FROM destinatarios_email WHERE obra = ? "
+                                "ORDER BY ultimo_envio IS NULL, ultimo_envio DESC, email", self.codigo)
+
+    def remover_destinatario(self, destinatario_id: int, usuario: dict) -> None:
+        linha = self.banco.um("SELECT email FROM destinatarios_email WHERE id = ? AND obra = ?",
+                              destinatario_id, self.codigo)
+        if not linha:
+            raise ErroNegocio("Destinatário não encontrado.")
+        self.banco.executar("DELETE FROM destinatarios_email WHERE id = ?", destinatario_id)
+        self.banco.registrar(None, usuario["login"], "email.destinatario_remover", {"email": linha["email"]},
+                             obra=self.codigo)
+
+    def enviar_resumo(self, usuario: dict, para: list[str], assunto: str, mensagem: str,
+                      pdf: bytes, nome_arquivo: str) -> dict:
+        """Envia o PDF do Resumo pela conta Microsoft do usuário e guarda os destinatários da obra."""
+        from . import microsoft
+        if not microsoft.modo_entra():
+            raise ErroNegocio("O envio por e-mail precisa do login Microsoft 365 (AUTH_MODE=entra).")
+        emails = list(dict.fromkeys(e.strip().lower() for e in para if e and e.strip()))
+        invalidos = [e for e in emails if not EMAIL_VALIDO.match(e)]
+        if invalidos:
+            raise ErroNegocio(f"E-mail inválido: {', '.join(invalidos)}")
+        if not emails:
+            raise ErroNegocio("Informe ao menos um destinatário.")
+        if len(emails) > MAX_DESTINATARIOS:
+            raise ErroNegocio(f"No máximo {MAX_DESTINATARIOS} destinatários por envio.")
+        if not pdf.startswith(b"%PDF"):
+            raise ErroNegocio("O anexo não é um PDF.")
+        assunto = " ".join(assunto.split())[:200] or f"Relatório de Aporte · {self.obra.nome}"
+        nome_arquivo = re.sub(r'[\\/:*?"<>|]+', "-", nome_arquivo.strip())[:120] or "Relatorio de Aporte.pdf"
+        if not nome_arquivo.lower().endswith(".pdf"):
+            nome_arquivo += ".pdf"
+        paragrafos = "".join(f"<p>{html.escape(p).replace(chr(10), '<br>')}</p>"
+                             for p in mensagem.strip().split("\n\n") if p.strip())
+        try:
+            self.servico.enviar_email(self.banco, usuario["usuario_id"], emails, assunto,
+                                      f'<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px">{paragrafos}</div>',
+                                      nome_arquivo, pdf)
+        except microsoft.ErroMicrosoft as erro:
+            raise ErroNegocio(str(erro)) from erro
+        quando = agora()
+        for email in emails:
+            self.banco.executar("INSERT INTO destinatarios_email (obra, email, criado_por, criado_em, ultimo_envio) "
+                                "VALUES (?, ?, ?, ?, ?) ON CONFLICT (obra, email) DO UPDATE SET "
+                                "ultimo_envio = excluded.ultimo_envio", self.codigo, email, usuario["login"],
+                                quando, quando)
+        self.banco.registrar(None, usuario["login"], "email.enviar_resumo",
+                             {"para": emails, "assunto": assunto, "arquivo": nome_arquivo}, obra=self.codigo)
+        return {"enviado_para": emails}
 
     def salvar_viabilidade(self, dados: dict[str, float], usuario: dict | None) -> dict:
         desconhecidas = set(dados) - set(self.nomes_rubricas())
