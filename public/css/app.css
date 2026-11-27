@@ -433,10 +433,10 @@ main { padding: 24px var(--gutter) 96px; }
               linear-gradient(150deg, var(--color-primary) 0%, var(--color-brand-deep) 100%);
 }
 .login-logo { width: min(340px, 78%); height: auto; display: block; position: relative; z-index: 1; }
-.login-marca-texto { position: relative; z-index: 1; max-width: 400px; }
-.login-marca-texto .eyebrow { color: rgb(255 255 255 / .72); }
-.login-marca-texto h2 { font-size: clamp(24px, 2.4vw, 32px); line-height: 1.2; margin-top: 10px; font-weight: 600; }
-.login-marca-texto p { color: rgb(255 255 255 / .8); margin: 12px 0 0; font-size: 15px; line-height: 1.55; }
+.login-marca-texto { position: relative; z-index: 1; max-width: 480px; }
+.login-marca-texto .eyebrow { color: rgb(255 255 255 / .72); font-size: 14px; }
+.login-marca-texto h2 { font-size: clamp(32px, 3.2vw, 44px); line-height: 1.15; margin-top: 12px; font-weight: 600; }
+.login-marca-texto p { color: rgb(255 255 255 / .8); margin: 14px 0 0; font-size: 19px; line-height: 1.5; }
 /* Sorriso do "y" e o "+" azul no canto de baixo, sempre inteiros dentro do painel. */
 .login-desenho { position: absolute; right: 24px; bottom: 0; width: min(420px, 82%); height: auto; pointer-events: none; }
 .login-desenho .sorriso { fill: none; stroke: rgb(255 255 255 / .12); stroke-width: 40; }
@@ -446,9 +446,9 @@ main { padding: 24px var(--gutter) 96px; }
   background: radial-gradient(700px 420px at 100% 100%, var(--color-primary-soft), transparent 70%), var(--surface); }
 .login-card { width: 100%; max-width: 380px; margin: auto 0; }
 .login-card .logo-mini { display: none; }
-.login-card .eyebrow { color: var(--color-primary); }
-.login-card h1 { font-size: 28px; margin-top: 8px; }
-.login-card > p { color: var(--muted); margin: 8px 0 28px; font-size: 15px; }
+.login-card .eyebrow { color: var(--color-primary); font-size: 14px; }
+.login-card h1 { font-size: 38px; margin-top: 10px; }
+.login-card > p { color: var(--muted); margin: 10px 0 28px; font-size: 18px; line-height: 1.5; }
 .login-card form, .login-card .acesso { display: grid; gap: 14px; }
 .login-card .btn { height: 48px; font-size: 15px; }
 .login-card .field input, .login-card .field select { height: 44px; }
@@ -466,7 +466,7 @@ main { padding: 24px var(--gutter) 96px; }
   .login-desenho { width: 150px; right: 16px; bottom: 0; }
   .login-painel { padding: 40px 16px 20px; justify-content: flex-start; }
   .login-card { margin: 0 0 auto; }
-  .login-card h1 { font-size: 24px; }
+  .login-card h1 { font-size: 30px; }
 }
 
 .fade { animation: aparecer .25s ease-out; }
